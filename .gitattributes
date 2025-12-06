@@ -1,0 +1,23 @@
+# Auto-normalize line endings
+* text=auto
+
+# Force LF endings for JavaScript & JSON (React Native)
+*.js  text eol=lf
+*.jsx text eol=lf
+*.json text eol=lf
+
+# Force LF endings for Python
+*.py text eol=lf
+
+# Do NOT change line endings for binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.mp4 binary
+*.mp3 binary
+
+# SQL / Config / Markdown
+*.sql  text eol=lf
+*.txt  text eol=lf
+*.md   text eol=lf

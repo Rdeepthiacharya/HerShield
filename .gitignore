@@ -1,4 +1,3 @@
-
 # ROOT CONFIG--------------
 
 # Environment variables
@@ -84,35 +83,28 @@ server/models/
 *.ppn
 
 #DATABASE FILES--------------
-
 *.db
 *.sqlite
 *.sqlite3
 
 #LOGS & REPORTS--------------
-
 logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
 coverage/
 test-results/
 .nyc_output/
 junit.xml
 
 #PACKAGE MANAGERS--------------
-
 # Uncomment if you want to ignore lock files
 # package-lock.json
 # yarn.lock
 # pnpm-lock.yaml
 
-
 #MISC / CACHE--------------
-
-
 .cache/
 *.tgz
 *.tar.gz
