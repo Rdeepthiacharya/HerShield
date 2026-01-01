@@ -15,13 +15,10 @@ import { WebView } from "react-native-webview";
 import * as Location from 'expo-location';
 import { Ionicons } from "@expo/vector-icons";
 import AppHeader from "../components/AppHeader";
+import GradientButton from "../components/GradientButton";
+import { useToast } from "../context/ToastContext";
+import { GEOAPIFY_KEY } from "../utils/config";
 
-const { width, height } = Dimensions.get('window');
-
-// Geoapify API Key
-const GEOAPIFY_API_KEY = "01e115490b5549cc9eff64708491d30e";
-
-// Karnataka bounding box for strict filtering
 const KARNATAKA_BOUNDS = {
   minLat: 11.5,
   maxLat: 18.45,
@@ -32,13 +29,14 @@ const KARNATAKA_BOUNDS = {
 export default function LocationPickerModal({ onClose, onLocationSelected }) {
   const webViewRef = useRef(null);
   const searchDebounceRef = useRef(null);
-  
+  const { showToast } = useToast();
+
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [selectedCoord, setSelectedCoord] = useState(null);
   const [selectedPlaceName, setSelectedPlaceName] = useState("");
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  
+
   const [isLoading, setIsLoading] = useState(false);
   const [locationMethod, setLocationMethod] = useState(null);
   const [userLocation, setUserLocation] = useState(null);
@@ -46,7 +44,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
   const [isLocationInKarnataka, setIsLocationInKarnataka] = useState(true);
   const [showSearchBar, setShowSearchBar] = useState(false);
 
-  // Strict check if coordinates are within Karnataka
   const checkIfInKarnataka = (lat, lng) => {
     return (
       lat >= KARNATAKA_BOUNDS.minLat &&
@@ -56,7 +53,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     );
   };
 
-  // HTML content for WebView map with Karnataka restrictions
   const htmlContent = `<!DOCTYPE html>
 <html>
 <head>
@@ -133,19 +129,17 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
 <div id="outsideKarnatakaOverlay" class="outside-karnataka-overlay"></div>
 
 <script>
-  const API_KEY = "${GEOAPIFY_API_KEY}";
+  const API_KEY = "${GEOAPIFY_KEY}";
   let map = null;
   let selectionMarker = null;
   let selectionPopup = null;
   let currentLocationMarker = null;
   
-  // Karnataka bounding coordinates - STRICT BOUNDS
   const KARNATAKA_BOUNDS = [
     [74.0, 11.5], // Southwest [lon, lat]
     [78.6, 18.45]  // Northeast [lon, lat]
   ];
 
-  // Initialize map
   function initMap() {
     map = new maplibregl.Map({
       container: "map",
@@ -158,7 +152,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
       minZoom: 7
     });
 
-    // Add Karnataka boundary layer when map loads
     map.on("load", function() {
       // Add Karnataka boundary source
       map.addSource('karnataka-boundary', {
@@ -179,7 +172,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
         }
       });
 
-      // Add fill layer for Karnataka
       map.addLayer({
         id: 'karnataka-fill',
         type: 'fill',
@@ -190,7 +182,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
         }
       });
 
-      // Add border layer
       map.addLayer({
         id: 'karnataka-border',
         type: 'line',
@@ -202,38 +193,32 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
         }
       });
 
-      // Notify React Native
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(
           JSON.stringify({ type: "mapLoaded" })
         );
       }
-      
-      // Set initial bounds
+
       map.fitBounds(KARNATAKA_BOUNDS, {
         padding: 50,
         duration: 1000
       });
     });
 
-    // Handle map clicks
     map.on("click", function(e) {
       const coord = { 
         lat: e.lngLat.lat, 
         lng: e.lngLat.lng 
       };
-      
-      // Check if clicked location is within Karnataka
+
       const isInKarnataka = checkIfInKarnataka(coord.lng, coord.lat);
       
       if (!isInKarnataka) {
-        // Show red overlay
         document.getElementById('outsideKarnatakaOverlay').style.display = 'block';
         setTimeout(() => {
           document.getElementById('outsideKarnatakaOverlay').style.display = 'none';
         }, 1000);
-        
-        // Send warning to React Native
+
         if (window.ReactNativeWebView) {
           window.ReactNativeWebView.postMessage(
             JSON.stringify({ 
@@ -244,11 +229,9 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
         }
         return;
       }
-      
-      // Update marker
+
       updateSelectionMarker(coord, true);
-      
-      // Send to React Native
+
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(
           JSON.stringify({ 
@@ -260,7 +243,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
       }
     });
 
-    // Prevent dragging outside Karnataka
     map.on("move", function() {
       const bounds = map.getBounds();
       const center = bounds.getCenter();
@@ -273,7 +255,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     });
   }
 
-  // Check if coordinates are within Karnataka
   function checkIfInKarnataka(lng, lat) {
     return (
       lng >= KARNATAKA_BOUNDS[0][0] &&
@@ -283,7 +264,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     );
   }
 
-  // Update current location marker
   function updateCurrentLocationMarker(coord) {
     if (currentLocationMarker) {
       currentLocationMarker.remove();
@@ -301,7 +281,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
       .addTo(map);
   }
 
-  // Update selection marker
   function updateSelectionMarker(coord) {
     if (selectionMarker) {
       selectionMarker.remove();
@@ -321,7 +300,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
       .setLngLat([coord.lng, coord.lat])
       .addTo(map);
     
-    // Center map on selection
     map.flyTo({
       center: [coord.lng, coord.lat],
       zoom: 15,
@@ -329,15 +307,13 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     });
   }
 
-  // Receive messages from React Native
   document.addEventListener("message", function(event) {
     try {
       const msg = JSON.parse(event.data);
 
       if (msg.type === "centerMap") {
         const coord = msg.coord;
-        
-        // Check if location is in Karnataka
+
         const isInKarnataka = checkIfInKarnataka(coord.lng, coord.lat);
         
         if (map && isInKarnataka) {
@@ -355,8 +331,7 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
         const coord = msg.coord;
         if (map) {
           updateCurrentLocationMarker(coord);
-          
-          // Center map only if in Karnataka
+
           if (checkIfInKarnataka(coord.lng, coord.lat)) {
             map.flyTo({
               center: [coord.lng, coord.lat],
@@ -380,30 +355,23 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     }
   });
 
-  // Initialize
   initMap();
 </script>
 </body>
 </html>`;
 
-  // Get current location
   useEffect(() => {
     getCurrentLocation();
   }, []);
 
-  // Get current location
   const getCurrentLocation = async () => {
     try {
       setIsLoading(true);
-      
+
       let { status } = await Location.requestForegroundPermissionsAsync();
-      
+
       if (status !== 'granted') {
-        Alert.alert(
-          'Location Permission Required',
-          'Please enable location permissions to use current location.',
-          [{ text: 'OK', style: 'cancel' }]
-        );
+        showToast("Location permission required to use current location", "error");
         setIsLoading(false);
         return;
       }
@@ -414,44 +382,41 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
 
       const lat = location.coords.latitude;
       const lon = location.coords.longitude;
-      
+
       const coordObj = { latitude: lat, longitude: lon };
       const isInKarnataka = checkIfInKarnataka(lat, lon);
-      
+
       setUserLocation(coordObj);
       setLocationMethod('live');
-      
+
       if (isInKarnataka) {
         setSelectedCoord(coordObj);
         setIsLocationInKarnataka(true);
-        
-        // Get address
+
         const address = await getAddressFromCoords(lat, lon);
         setSelectedPlaceName(address);
-        
-        // Center map on location
+
         if (webViewRef.current) {
           webViewRef.current.postMessage(
-            JSON.stringify({ 
-              type: "showCurrentLocation", 
+            JSON.stringify({
+              type: "showCurrentLocation",
               coord: { lat, lng: lon }
             })
           );
         }
       } else {
         setIsLocationInKarnataka(false);
-        
-        // Still center on current location
+
         if (webViewRef.current) {
           webViewRef.current.postMessage(
-            JSON.stringify({ 
-              type: "centerMap", 
+            JSON.stringify({
+              type: "centerMap",
               coord: { lat, lng: lon }
             })
           );
         }
       }
-      
+
     } catch (error) {
       console.log("Error getting location:", error);
     } finally {
@@ -459,14 +424,13 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     }
   };
 
-  // Get address from coordinates using Geoapify
   const getAddressFromCoords = async (lat, lon) => {
     try {
-      const url = `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lon}&apiKey=${GEOAPIFY_API_KEY}`;
-      
+      const url = `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lon}&apiKey=${GEOAPIFY_KEY}`;
+
       const res = await fetch(url);
       const data = await res.json();
-      
+
       if (data.features && data.features.length > 0) {
         const props = data.features[0].properties;
         return props.formatted || '';
@@ -477,7 +441,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     return '';
   };
 
-  // ENHANCED SEARCH: Geoapify Autocomplete with STRICT Karnataka restriction
   const searchLocation = async (text) => {
     if (text.length < 2) {
       setSearchResults([]);
@@ -485,63 +448,58 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     }
 
     setSearchQuery(text);
-    
-    // Clear previous debounce timer
+
     if (searchDebounceRef.current) {
       clearTimeout(searchDebounceRef.current);
     }
-    
-    // Set new debounce timer
+
     searchDebounceRef.current = setTimeout(async () => {
       setIsLoading(true);
-      
+
       try {
-        // GEOAPIFY AUTOCOMPLETE WITH KARNATAKA RESTRICTION
         const url = `https://api.geoapify.com/v1/geocode/autocomplete?` +
           `text=${encodeURIComponent(text)}&` +
           `filter=rect:${KARNATAKA_BOUNDS.minLng},${KARNATAKA_BOUNDS.minLat},${KARNATAKA_BOUNDS.maxLng},${KARNATAKA_BOUNDS.maxLat}&` +
           `bias=countrycode:in&` +
           `limit=8&` +
-          `apiKey=${GEOAPIFY_API_KEY}`;
-        
+          `apiKey=${GEOAPIFY_KEY}`;
+
         console.log("Searching with Karnataka restriction:", url);
-        
+
         const response = await fetch(url);
         const data = await response.json();
-        
+
         if (data.features && data.features.length > 0) {
-          // Process and enhance results
+
           const processedResults = data.features.map(feature => {
             const props = feature.properties;
-            
-            // Create display text
+
             const displayParts = [];
             if (props.name) displayParts.push(props.name);
             if (props.street && props.street !== props.name) displayParts.push(props.street);
             if (props.city) displayParts.push(props.city);
             if (props.district) displayParts.push(props.district);
             if (props.state) displayParts.push(props.state);
-            
+
             const displayText = displayParts.join(', ');
-            
-            // Determine icon type
+
+
             let iconType = 'location-outline';
             if (props.category === 'commercial') iconType = 'business';
             if (props.category === 'building') iconType = 'business';
             if (props.category === 'highway') iconType = 'road';
             if (props.category === 'natural') iconType = 'leaf';
             if (props.category === 'tourism') iconType = 'camera';
-            
-            // Calculate relevance score
+
             let score = 0;
             const searchLower = text.toLowerCase();
-            
+
             if (props.name && props.name.toLowerCase().includes(searchLower)) score += 10;
             if (props.street && props.street.toLowerCase().includes(searchLower)) score += 8;
             if (props.city && props.city.toLowerCase().includes(searchLower)) score += 6;
             if (props.state === 'Karnataka') score += 5;
             if (props.type === 'amenity') score += 3;
-            
+
             return {
               ...feature,
               properties: {
@@ -553,34 +511,32 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
               }
             };
           });
-          
-          // Sort by relevance
+
+
           processedResults.sort((a, b) => b.properties.relevance_score - a.properties.relevance_score);
-          
+
           setSearchResults(processedResults);
-          
+
         } else {
           setSearchResults([]);
         }
-        
+
       } catch (error) {
         console.log("Search error:", error);
         setSearchResults([]);
       } finally {
         setIsLoading(false);
       }
-    }, 300); // 300ms debounce
+    }, 300);
   };
 
-  // Select search result
   const handleSelectSearchResult = async (feature) => {
     const props = feature.properties;
     const lat = parseFloat(props.lat);
     const lon = parseFloat(props.lon);
-    
-    // Verify it's in Karnataka (double check)
+
     const isInKarnataka = checkIfInKarnataka(lat, lon);
-    
+
     if (!isInKarnataka) {
       setIsLocationInKarnataka(false);
       return;
@@ -595,49 +551,44 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     setSearchResults([]);
     setSearchQuery(props.name || props.street || props.city || "");
 
-      setShowSearchBar(false);
-  setIsSearchFocused(false);
+    setShowSearchBar(false);
+    setIsSearchFocused(false);
 
-    // Get detailed address
     const detailedAddress = await getAddressFromCoords(lat, lon);
     if (detailedAddress) {
       setSelectedPlaceName(detailedAddress);
     }
 
-    // Center map on selected location
     if (webViewRef.current) {
       webViewRef.current.postMessage(
-        JSON.stringify({ 
-          type: "centerMap", 
+        JSON.stringify({
+          type: "centerMap",
           coord: { lat, lng: lon }
         })
       );
     }
   };
 
-  // Handle messages from WebView
   const handleWebViewMessage = (event) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
-      
+
       if (msg.type === "locationSelectedFromMap") {
         const coord = msg.coord;
         const coordObj = { latitude: coord.lat, longitude: coord.lng };
         const isInKarnataka = checkIfInKarnataka(coord.lat, coord.lng);
-        
+
         setSelectedCoord(coordObj);
         setIsLocationInKarnataka(isInKarnataka);
         setLocationMethod('manual');
-        
-        // Get place name
+
         getAddressFromCoords(coord.lat, coord.lng).then(address => {
           setSelectedPlaceName(address);
         });
-        
+
       } else if (msg.type === "outsideKarnatakaClick") {
-        // Just update UI state, no alert
         setIsLocationInKarnataka(false);
-        
+
       } else if (msg.type === "mapLoaded") {
         setIsLoadingMap(false);
       }
@@ -646,7 +597,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     }
   };
 
-  // Reset view to Karnataka bounds
   const resetToKarnatakaView = () => {
     if (webViewRef.current) {
       webViewRef.current.postMessage(
@@ -655,17 +605,14 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     }
   };
 
-  // Toggle search bar visibility
   const toggleSearchBar = () => {
     setShowSearchBar(!showSearchBar);
     if (!showSearchBar) {
-      // Clear search when showing search bar
       setSearchQuery("");
       setSearchResults([]);
     }
   };
 
-  // Clear selection
   const handleClearSelection = () => {
     setSelectedCoord(null);
     setSearchQuery("");
@@ -675,38 +622,34 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     setSearchResults([]);
   };
 
-  // Clear search
   const clearSearch = () => {
     setSearchQuery("");
     setSearchResults([]);
   };
 
-  // Focus search
   const focusSearch = () => {
     setIsSearchFocused(true);
   };
 
-  // Blur search
   const blurSearch = () => {
     setTimeout(() => {
       setIsSearchFocused(false);
     }, 200);
   };
 
-  // Confirm selection
   const handleConfirm = () => {
     if (!selectedCoord) {
-      Alert.alert("No Location", "Please select a location first.");
+      showToast("Please select a location first", "error");
       return;
     }
-    
-    // FINAL VALIDATION
+
     const isInKarnataka = checkIfInKarnataka(
-      selectedCoord.latitude, 
+      selectedCoord.latitude,
       selectedCoord.longitude
     );
-    
+
     if (!isInKarnataka) {
+      showToast("Location must be within Karnataka for incident reporting", "warning");
       Alert.alert(
         "⚠️ Location Outside Karnataka",
         "This location is outside Karnataka. Please select a location within Karnataka for incident reporting.",
@@ -714,8 +657,7 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
       );
       return;
     }
-    
-    // Prepare location data
+
     const locationData = {
       ...selectedCoord,
       method: locationMethod,
@@ -723,17 +665,16 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
       timestamp: new Date().toISOString(),
       isInKarnataka: true
     };
-    
+
     onLocationSelected(locationData);
   };
 
-  // Re-center to current location
   const reCenterToCurrentLocation = () => {
     if (userLocation) {
       if (webViewRef.current) {
         webViewRef.current.postMessage(
-          JSON.stringify({ 
-            type: "centerMap", 
+          JSON.stringify({
+            type: "centerMap",
             coord: { lat: userLocation.latitude, lng: userLocation.longitude }
           })
         );
@@ -743,7 +684,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
     }
   };
 
-  // Get icon for location type
   const getIconForType = (iconType) => {
     switch (iconType) {
       case 'business': return 'business';
@@ -756,16 +696,15 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
 
   return (
     <>
-      <AppHeader 
+      <AppHeader
         title="Select Location"
         showBack={true}
         onBack={onClose}
         variant="dark"
         showProfile={false}
       />
-      
+
       <View style={styles.container}>
-        {/* SEARCH BAR */}
         {showSearchBar && (
           <View style={styles.searchContainer}>
             <View style={styles.searchBox}>
@@ -792,7 +731,7 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
               ) : null}
             </View>
 
-            {/* SEARCH RESULTS */}
+
             {(isSearchFocused || searchResults.length > 0) && (
               <View style={styles.resultsContainer}>
                 {isLoading && searchResults.length === 0 ? (
@@ -807,16 +746,16 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
                     renderItem={({ item }) => {
                       const props = item.properties;
                       const isKarnataka = props.is_karnataka;
-                      
+
                       return (
                         <TouchableOpacity
                           style={styles.resultItem}
                           onPress={() => handleSelectSearchResult(item)}
                         >
-                          <Ionicons 
-                            name={getIconForType(props.icon_type)} 
-                            size={20} 
-                            color={isKarnataka ? "#4CAF50" : "#ff9800"} 
+                          <Ionicons
+                            name={getIconForType(props.icon_type)}
+                            size={20}
+                            color={isKarnataka ? "#4CAF50" : "#ff9800"}
                           />
                           <View style={styles.resultTextContainer}>
                             <Text style={styles.resultTitle} numberOfLines={1}>
@@ -863,35 +802,31 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
           </View>
         )}
 
-        {/* MAP SECTION */}
+
         <View style={styles.mapSection}>
-          {/* FLOATING ACTION BUTTONS */}
           <View style={styles.floatingButtonsContainer}>
-            {/* SEARCH TOGGLE BUTTON */}
             <TouchableOpacity
               onPress={toggleSearchBar}
               style={styles.floatingButton}
             >
-              <Ionicons 
-              name={showSearchBar ? "close" : "search"} 
-              size={22} 
-              color="#fff" 
-            />
+              <Ionicons
+                name={showSearchBar ? "close" : "search"}
+                size={22}
+                color="#fff"
+              />
             </TouchableOpacity>
 
-            {/* CURRENT LOCATION BUTTON */}
             <TouchableOpacity
               onPress={reCenterToCurrentLocation}
               style={styles.floatingButton}
             >
-              <Ionicons 
-                name="locate" 
-                size={22} 
-                color="#fff" 
+              <Ionicons
+                name="locate"
+                size={22}
+                color="#fff"
               />
             </TouchableOpacity>
 
-            {/* RESET KARNATAKA VIEW BUTTON */}
             <TouchableOpacity
               onPress={resetToKarnatakaView}
               style={styles.floatingButton}
@@ -900,7 +835,6 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
             </TouchableOpacity>
           </View>
 
-          {/* WEBVIEW MAP */}
           <View style={styles.mapContainer}>
             {isLoadingMap && (
               <View style={styles.mapLoading}>
@@ -908,7 +842,7 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
                 <Text style={styles.mapLoadingText}>Loading Karnataka map...</Text>
               </View>
             )}
-            
+
             <WebView
               ref={webViewRef}
               source={{ html: htmlContent }}
@@ -921,13 +855,13 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
               onLoadEnd={() => setIsLoadingMap(false)}
               onError={(error) => {
                 console.error('WebView error:', error);
-                Alert.alert("Map Error", "Failed to load map.");
+                showToast("Failed to load map", "error");
               }}
             />
           </View>
         </View>
 
-        {/* SELECTED LOCATION INFO */}
+
         {selectedCoord && (
           <View style={styles.selectedInfo}>
             <View style={[
@@ -935,17 +869,17 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
               !isLocationInKarnataka && styles.coordsBoxWarning
             ]}>
               <View style={styles.coordsHeader}>
-                <Ionicons 
-                  name={locationMethod === 'live' ? "location" : 
-                        locationMethod === 'search' ? "search" : "pin"} 
-                  size={24} 
-                  color={isLocationInKarnataka ? "#4CAF50" : "#ff4444"} 
+                <Ionicons
+                  name={locationMethod === 'live' ? "location" :
+                    locationMethod === 'search' ? "search" : "pin"}
+                  size={24}
+                  color={isLocationInKarnataka ? "#4CAF50" : "#ff4444"}
                 />
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={styles.coordsLabel}>
-                    {locationMethod === 'live' ? 'Current Location' : 
-                     locationMethod === 'search' ? 'Searched Location' : 
-                     'Selected Location'}
+                    {locationMethod === 'live' ? 'Current Location' :
+                      locationMethod === 'search' ? 'Searched Location' :
+                        'Selected Location'}
                   </Text>
                   <Text style={styles.coordsText}>
                     {selectedCoord.latitude.toFixed(6)}, {selectedCoord.longitude.toFixed(6)}
@@ -980,23 +914,20 @@ export default function LocationPickerModal({ onClose, onLocationSelected }) {
           </View>
         )}
 
-        {/* CONFIRM BUTTON */}
         <View style={styles.bottomBar}>
-          <TouchableOpacity
-            style={[
-              styles.confirmButton,
-              (!selectedCoord || !isLocationInKarnataka) && styles.confirmButtonDisabled,
-            ]}
-            disabled={!selectedCoord || !isLocationInKarnataka}
+          <GradientButton
+            text={
+              !selectedCoord
+                ? "Select a Location"
+                : !isLocationInKarnataka
+                  ? "Location Outside Karnataka"
+                  : "Confirm Karnataka Location"
+            }
             onPress={handleConfirm}
-          >
-            <Ionicons name="checkmark-circle" size={24} color="#fff" />
-            <Text style={styles.confirmText}>
-              {!selectedCoord ? "Select a Location" :
-               !isLocationInKarnataka ? "Location Outside Karnataka" :
-               "Confirm Karnataka Location"}
-            </Text>
-          </TouchableOpacity>
+            disabled={!selectedCoord || !isLocationInKarnataka}  // same logic as old button
+            icon={<Ionicons name="checkmark-circle" size={24} color="#fff" />}
+          />
+
         </View>
       </View>
     </>
@@ -1256,23 +1187,5 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderTopWidth: 1,
     borderTopColor: "#e9ecef",
-  },
-  confirmButton: {
-    backgroundColor: "#29011b",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    gap: 10,
-  },
-  confirmButtonDisabled: {
-    backgroundColor: "#ccc",
-  },
-  confirmText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#fff",
   },
 });
