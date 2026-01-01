@@ -10,9 +10,9 @@
     "ios": "expo run:ios"
   },
   "dependencies": {
+    "@expo/metro-runtime": "~4.0.1",
     "@expo/vector-icons": "~14.0.4",
     "@maplibre/maplibre-react-native": "^10.4.1",
-    "@picovoice/porcupine-react-native": "^3.0.5",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-native-clipboard/clipboard": "github:react-native-clipboard/clipboard",
     "@react-native-picker/picker": "2.9.0",
@@ -22,9 +22,7 @@
     "axios": "^1.6.0",
     "expo": "~52.0.0",
     "expo-asset": "~11.0.5",
-    "expo-av": "~15.0.2",
     "expo-constants": "~17.0.3",
-    "expo-file-system": "~18.0.12",
     "expo-font": "~13.0.4",
     "expo-intent-launcher": "~12.0.2",
     "expo-linear-gradient": "~14.0.2",
@@ -38,7 +36,9 @@
     "geolib": "^3.3.4",
     "mathjs": "^15.1.0",
     "react": "18.3.1",
+    "react-dom": "18.3.1",
     "react-native": "0.76.9",
+    "react-native-audio-record": "^0.2.2",
     "react-native-chart-kit": "^6.12.0",
     "react-native-gesture-handler": "~2.20.2",
     "react-native-get-random-values": "^1.11.0",
@@ -47,6 +47,7 @@
     "react-native-screens": "~4.4.0",
     "react-native-share": "^12.2.1",
     "react-native-svg": "15.8.0",
+    "react-native-web": "~0.19.13",
     "react-native-webview": "^13.12.5",
     "react-native-youtube-iframe": "^2.4.1",
     "socket.io-client": "^4.8.1"

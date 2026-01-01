@@ -39,11 +39,10 @@ export default function ProfileScreen({ navigation }) {
   const [oldPass, setOldPass] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
-  const [voiceSampleExists, setVoiceSampleExists] = useState(false);
 
 
   const [expandedSections, setExpandedSections] = useState({
-    profile:false, address:false, security:false, contacts:false, reports:false, sos:false
+    profile: false, address: false, security: false, contacts: false, reports: false, sos: false
   });
 
   useEffect(() => {
@@ -58,7 +57,6 @@ export default function ProfileScreen({ navigation }) {
         const parsed = JSON.parse(stored);
         const email = parsed.email_id || parsed.email;
 
-        // Fetch user
         const userRes = await fetch(`${BASE_URL}/user/${email}`);
         if (!userRes.ok) {
           const text = await userRes.text();
@@ -76,7 +74,6 @@ export default function ProfileScreen({ navigation }) {
           setUser(userData.user);
         }
 
-        // Contacts
         const contactsRes = await fetch(`${BASE_URL}/trusted-contacts/${userData.user.id}`);
         if (contactsRes.ok) {
           const contactsData = await contactsRes.json();
@@ -88,7 +85,6 @@ export default function ProfileScreen({ navigation }) {
           console.warn("Failed to load contacts:", contactsRes.status);
         }
 
-        // SOS Logs
         const sosRes = await fetch(`${BASE_URL}/sos_logs/${userData.user.id}`);
         if (sosRes.ok) {
           const sosData = await sosRes.json();
@@ -97,8 +93,6 @@ export default function ProfileScreen({ navigation }) {
           }
         }
 
-        // Incident reports user filed
-        // Incident reports user filed
         const incRes = await fetch(`${BASE_URL}/incident_reports/${userData.user.id}`);
         if (incRes.ok) {
           const incData = await incRes.json();
@@ -118,10 +112,9 @@ export default function ProfileScreen({ navigation }) {
   }, []);
 
   const toggleSection = (key) => {
-    setExpandedSections(s => ({...s, [key]: !s[key]}));
+    setExpandedSections(s => ({ ...s, [key]: !s[key] }));
   };
 
-  // SAVING PROFILE
   const handleSaveProfile = async () => {
     try {
       setLoading(true);
@@ -158,9 +151,8 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
-  // ADD CONTACT
+
   const handleAddContact = async () => {
-    // Validation
     if (!newContactName.trim() || !newMobileNumber.trim()) {
       toast.showToast("Please fill in contact name and mobile number", "error");
       return;
@@ -201,8 +193,6 @@ export default function ProfileScreen({ navigation }) {
         throw new Error("Invalid response from server");
       }
 
-
-      // Add new contact to the list
       const newContact = {
         contact_id: data.contact_id,
         contact_name: newContactName.trim(),
@@ -212,16 +202,13 @@ export default function ProfileScreen({ navigation }) {
       };
 
       setContacts(prev => [newContact, ...prev]);
-      
-      // Clear form
+
       setNewContactName("");
       setNewMobileNumber("");
       setNewRelationship("");
 
-      // Show success message
       toast.showToast("Contact added successfully!", "success");
 
-      // Ensure contacts section is expanded
       if (!expandedSections.contacts) {
         setExpandedSections(prev => ({ ...prev, contacts: true }));
       }
@@ -233,7 +220,6 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
-  // REMOVE CONTACT
   const handleRemoveContact = async (contact_id) => {
     try {
       setLoading(true);
@@ -252,7 +238,6 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
-  // CHANGE PASSWORD
   const handleChangePassword = async () => {
     if (!oldPass || !newPass || !confirmPass) {
       toast.showToast("Fill all password fields", "error");
@@ -291,7 +276,7 @@ export default function ProfileScreen({ navigation }) {
   };
 
 
-  
+
   const handleLogout = async () => {
     try {
       setLoading(true);
@@ -303,10 +288,8 @@ export default function ProfileScreen({ navigation }) {
         storedEmail = parsed.email_id || parsed.email;
       }
 
-      // remove the user entry
       await AsyncStorage.removeItem("user");
 
-      // verify removal — if it still exists, perform a broader clear as fallback
       const verify = await AsyncStorage.getItem("user");
       if (verify) {
         try {
@@ -336,11 +319,10 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
-  // CONTACT LIST ITEM
   const ContactItem = ({ item }) => (
     <View style={styles.contactItem}>
-      <Ionicons name="person-circle" size={40} style={{marginRight:10}} />
-      <View style={{flex:1}}>
+      <Ionicons name="person-circle" size={40} style={{ marginRight: 10 }} />
+      <View style={{ flex: 1 }}>
         <Text style={styles.contactText}>{item.contact_name}</Text>
         <Text style={styles.contactNumber}>{item.mobile_number}</Text>
         <Text style={styles.relationshipBadge}>{item.relationship}</Text>
@@ -351,11 +333,10 @@ export default function ProfileScreen({ navigation }) {
     </View>
   );
 
-  // INCIDENT REPORT ITEM
   const ReportItem = ({ item }) => (
     <View style={styles.reportItem}>
-      <Ionicons name="alert-circle" size={26} color="#8B133E" style={{marginRight:10}} />
-      <View style={{flex:1}}>
+      <Ionicons name="alert-circle" size={26} color="#8B133E" style={{ marginRight: 10 }} />
+      <View style={{ flex: 1 }}>
         <Text style={styles.reportText}>{item.incident_type.toUpperCase()}</Text>
         <Text style={styles.reportDesc}>{item.description}</Text>
         <Text style={styles.reportMeta}>📍 {item.place_name || "Unknown"}</Text>
@@ -364,34 +345,23 @@ export default function ProfileScreen({ navigation }) {
     </View>
   );
 
-  // SOS LOG ITEM
   const SosItem = ({ item }) => (
     <View style={styles.sosItem}>
-      <Ionicons name="megaphone" size={26} color="#D72638" style={{marginRight:10}}/>
-      <View style={{flex:1}}>
+      <Ionicons name="megaphone" size={26} color="#D72638" style={{ marginRight: 10 }} />
+      <View style={{ flex: 1 }}>
         <Text style={styles.reportText}>SOS Trigger: {item.trigger_type}</Text>
-        
-        {/* Show transcript if saved */}
         {item.message && (
           <Text style={styles.reportMeta}> Statement: "{item.message}"</Text>
         )}
-
-        {/* Who received SMS */}
         {item.recipients && (
           <Text style={styles.reportMeta}> Recipients: {item.recipients}</Text>
         )}
-
-        {/* Status */}
         {item.sms_status && (
           <Text style={styles.reportMeta}> SMS Status: {item.sms_status}</Text>
         )}
-
-        {/* Location */}
         {item.location && (
           <Text style={styles.reportMeta}>📍 Location: {item.location}</Text>
         )}
-
-        {/* Timestamp */}
         {item.timestamp && (
           <Text style={styles.reportTime}>⏱ Time: {formatDate(item.timestamp)}</Text>
         )}
@@ -402,150 +372,146 @@ export default function ProfileScreen({ navigation }) {
   return (
     <>
       <AppHeader title="Profile" showLogout onLogout={handleLogout} />
+      <ScrollView style={{ flex: 1 }}>
+        <PageWrapper loading={loading} contentContainerStyle={{ padding: 16 }}>
 
-      <ScrollView style={{flex:1}}>
-      <PageWrapper loading={loading}  contentContainerStyle={{padding:16}}>
-        
-        {/* HEADER */}
-        <View style={styles.headerRow}>
-          <Image
-            source={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(user.fullname || "User")}&background=8B133E&color=fff&size=180` }}
-            style={styles.profileImage}
-          />
-          <View style={{flex:1, marginLeft:12}}>
-            <Text style={styles.userName}>{user.fullname || "User"}</Text>
-            <Text style={styles.userEmail}>{user.email_id}</Text>
+          <View style={styles.headerRow}>
+            <Image
+              source={{ uri: `https://ui-avatars.com/api/?name=${encodeURIComponent(user.fullname || "User")}&background=8B133E&color=fff&size=180` }}
+              style={styles.profileImage}
+            />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.userName}>{user.fullname || "User"}</Text>
+              <Text style={styles.userEmail}>{user.email_id}</Text>
+            </View>
+            <TouchableOpacity style={styles.editBtn} onPress={() => {
+              if (editing) {
+
+                setOldPass("");
+                setNewPass("");
+                setConfirmPass("");
+              }
+              setEditing(!editing);
+            }}>
+              <Ionicons name={editing ? "close" : "create"} size={22} color="#fff" />
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity style={styles.editBtn} onPress={() => {
-            if (editing) {
-              // Clear password fields when closing edit mode
-              setOldPass("");
-              setNewPass("");
-              setConfirmPass("");
-            }
-            setEditing(!editing);
-          }}>
-            <Ionicons name={editing?"close":"create"} size={22} color="#fff"/>
-          </TouchableOpacity>
-        </View>
 
-        {/* PERSONAL SECTION */}
-        <View style={styles.card}>
-          <TouchableOpacity onPress={()=>toggleSection("profile")}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeader}>Personal Information</Text>
-              <Ionicons name={expandedSections.profile?"arrow-up":"arrow-down"} size={20}/>
-            </View>
-          </TouchableOpacity>
-          {expandedSections.profile && (
-             <>
-           <View style={styles.addContactBlock}>
-              <FloatingLabelInput editable={editing} label="Full Name" value={user.fullname} onChangeText={(t)=>setUser(s=>({...s,fullname:t}))}/>
-              <FloatingLabelInput editable={false} label="Email" value={user.email_id}/>
-              <FloatingLabelInput editable={editing} label="Mobile" value={user.mobile_no} onChangeText={(t)=>setUser(s=>({...s,mobile_no:t.replace(/\D/g,"") }))}/>
-              <FloatingLabelInput editable={editing} label="Birth Date" value={user.birth_date} onChangeText={(t)=>setUser(s=>({...s,birth_date:t}))}/>
-              <FloatingLabelInput editable={editing} label="Address" value={user.address_line_1} onChangeText={(t)=>setUser(s=>({...s,address_line_1:t}))}/>
-              <FloatingLabelInput editable={editing} label="City" value={user.city} onChangeText={(t)=>setUser(s=>({...s,city:t}))}/>
-              <FloatingLabelInput editable={editing} label="State" value={user.state} onChangeText={(t)=>setUser(s=>({...s,state:t}))}/>
-              <FloatingLabelInput editable={editing} label="PIN Code" value={user.zip_code} onChangeText={(t)=>setUser(s=>({...s,zip_code:t.replace(/\D/g,"") }))}/>
 
-              {editing && <GradientButton text="Save Profile" onPress={handleSaveProfile}/> }
+          <View style={styles.card}>
+            <TouchableOpacity onPress={() => toggleSection("profile")}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionHeader}>Personal Information</Text>
+                <Ionicons name={expandedSections.profile ? "arrow-up" : "arrow-down"} size={20} />
               </View>
-            </>
-          )}
-        </View>
+            </TouchableOpacity>
+            {expandedSections.profile && (
+              <>
+                <View style={styles.addContactBlock}>
+                  <FloatingLabelInput editable={editing} label="Full Name" value={user.fullname} onChangeText={(t) => setUser(s => ({ ...s, fullname: t }))} />
+                  <FloatingLabelInput editable={false} label="Email" value={user.email_id} />
+                  <FloatingLabelInput editable={editing} label="Mobile" value={user.mobile_no} onChangeText={(t) => setUser(s => ({ ...s, mobile_no: t.replace(/\D/g, "") }))} />
+                  <FloatingLabelInput editable={editing} label="Birth Date" value={user.birth_date} onChangeText={(t) => setUser(s => ({ ...s, birth_date: t }))} />
+                  <FloatingLabelInput editable={editing} label="Address" value={user.address_line_1} onChangeText={(t) => setUser(s => ({ ...s, address_line_1: t }))} />
+                  <FloatingLabelInput editable={editing} label="City" value={user.city} onChangeText={(t) => setUser(s => ({ ...s, city: t }))} />
+                  <FloatingLabelInput editable={editing} label="State" value={user.state} onChangeText={(t) => setUser(s => ({ ...s, state: t }))} />
+                  <FloatingLabelInput editable={editing} label="PIN Code" value={user.zip_code} onChangeText={(t) => setUser(s => ({ ...s, zip_code: t.replace(/\D/g, "") }))} />
 
-                    {/* CONTACTS SECTION */}
-                    <View style={styles.card}>
-          <TouchableOpacity onPress={()=>toggleSection("contacts")}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeader}>Trusted Contacts ({contacts.length})</Text>
-              <Ionicons name={expandedSections.contacts?"arrow-up":"arrow-down"} size={20}/>
-            </View>
-          </TouchableOpacity>
-          {expandedSections.contacts && (
-            <>
-              {editing ? (
-                <>
-                  <View style={styles.addContactBlock}>
-                    <FloatingLabelInput
-                      label="Contact name"
-                      value={newContactName}
-                      onChangeText={setNewContactName}
-                    />
-                    <FloatingLabelInput
-                      label="Mobile number"
-                      value={newMobileNumber}
-                      keyboardType="number-pad"
-                      maxLength={10}
-                      onChangeText={(t) =>
-                        setNewMobileNumber(t.replace(/[^0-9]/g, ""))
-                      }
-                    />
+                  {editing && <GradientButton text="Save Profile" onPress={handleSaveProfile} />}
+                </View>
+              </>
+            )}
+          </View>
 
-                    <FloatingLabelInput
-                      label="Relationship"
-                      value={newRelationship}
-                      onChangeText={setNewRelationship}
-                    />
-                    <GradientButton text="Add Contact | max(5)" onPress={handleAddContact} />
-                  </View>
+          <View style={styles.card}>
+            <TouchableOpacity onPress={() => toggleSection("contacts")}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionHeader}>Trusted Contacts ({contacts.length})</Text>
+                <Ionicons name={expandedSections.contacts ? "arrow-up" : "arrow-down"} size={20} />
+              </View>
+            </TouchableOpacity>
+            {expandedSections.contacts && (
+              <>
+                {editing ? (
+                  <>
+                    <View style={styles.addContactBlock}>
+                      <FloatingLabelInput
+                        label="Contact name"
+                        value={newContactName}
+                        onChangeText={setNewContactName}
+                      />
+                      <FloatingLabelInput
+                        label="Mobile number"
+                        value={newMobileNumber}
+                        keyboardType="number-pad"
+                        maxLength={10}
+                        onChangeText={(t) =>
+                          setNewMobileNumber(t.replace(/[^0-9]/g, ""))
+                        }
+                      />
 
-                  <Text
-                    style={{ marginBottom: 8, color: "#666", fontWeight: "600" }}
-                  >
-                    {contacts.length} saved
-                  </Text>
+                      <FloatingLabelInput
+                        label="Relationship"
+                        value={newRelationship}
+                        onChangeText={setNewRelationship}
+                      />
+                      <GradientButton text="Add Contact | max(5)" onPress={handleAddContact} />
+                    </View>
 
-                  {contacts.length === 0 ? (
-                    <Text style={styles.emptyText}>No trusted contacts yet</Text>
-                  ) : (
-                    contacts.map((item, index) => {
-                      if (!item || !item.contact_id) {
-                        console.warn("Invalid contact item:", item);
-                        return null;
-                      }
-                      return (
-                        <View key={String(item.contact_id)}>
-                          {index > 0 && <View style={{ height: 8 }} />}
-                          <ContactItem item={item} />
-                        </View>
-                      );
-                    })
-                  )}
-                </>
-              ) : (
-                <>
-                  <Text
-                    style={{ marginBottom: 8, color: "#666", fontWeight: "600" }}
-                  >
-                    {contacts.length} saved
-                  </Text>
-                  {contacts.length === 0 ? (
-                    <Text style={styles.emptyText}>No trusted contacts yet</Text>
-                  ) : (
-                    contacts.map((item, index) => {
-                      if (!item || !item.contact_id) {
-                        console.warn("Invalid contact item:", item);
-                        return null;
-                      }
-                      return (
-                        <View key={String(item.contact_id)}>
-                          {index > 0 && <View style={{ height: 8 }} />}
-                          <ContactItem item={item} />
-                        </View>
-                      );
-                    })
-                  )}
-                </>
-              )}
-            </>
-          )}
-        </View>
+                    <Text
+                      style={{ marginBottom: 8, color: "#666", fontWeight: "600" }}
+                    >
+                      {contacts.length} saved
+                    </Text>
+
+                    {contacts.length === 0 ? (
+                      <Text style={styles.emptyText}>No trusted contacts yet</Text>
+                    ) : (
+                      contacts.map((item, index) => {
+                        if (!item || !item.contact_id) {
+                          console.warn("Invalid contact item:", item);
+                          return null;
+                        }
+                        return (
+                          <View key={String(item.contact_id)}>
+                            {index > 0 && <View style={{ height: 8 }} />}
+                            <ContactItem item={item} />
+                          </View>
+                        );
+                      })
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Text
+                      style={{ marginBottom: 8, color: "#666", fontWeight: "600" }}
+                    >
+                      {contacts.length} saved
+                    </Text>
+                    {contacts.length === 0 ? (
+                      <Text style={styles.emptyText}>No trusted contacts yet</Text>
+                    ) : (
+                      contacts.map((item, index) => {
+                        if (!item || !item.contact_id) {
+                          console.warn("Invalid contact item:", item);
+                          return null;
+                        }
+                        return (
+                          <View key={String(item.contact_id)}>
+                            {index > 0 && <View style={{ height: 8 }} />}
+                            <ContactItem item={item} />
+                          </View>
+                        );
+                      })
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </View>
 
 
-        {/* SECURITY */}
-        <View style={styles.card}>
+          <View style={styles.card}>
             <TouchableOpacity onPress={() => toggleSection("security")}>
               <View style={styles.sectionHeaderRow}>
                 <Text style={styles.sectionHeader}>Security</Text>
@@ -558,95 +524,93 @@ export default function ProfileScreen({ navigation }) {
 
             {expandedSections.security && (
               <>
-              <View style={styles.addContactBlock}>
-                <Text style={styles.voiceTitle}>Change Password</Text>
+                <View style={styles.addContactBlock}>
+                  <Text style={styles.voiceTitle}>Change Password</Text>
 
-                <PasswordInput label="Old Password" value={oldPass} onChangeText={setOldPass} editable={editing} />
-                <PasswordInput label="New Password" value={newPass} onChangeText={setNewPass} editable={editing} />
-                <PasswordInput label="Confirm Password" value={confirmPass} onChangeText={setConfirmPass} editable={editing} />
+                  <PasswordInput label="Old Password" value={oldPass} onChangeText={setOldPass} editable={editing} />
+                  <PasswordInput label="New Password" value={newPass} onChangeText={setNewPass} editable={editing} />
+                  <PasswordInput label="Confirm Password" value={confirmPass} onChangeText={setConfirmPass} editable={editing} />
 
-                {editing && (
-                  <GradientButton text="Change Password" onPress={handleChangePassword} />
-                )}
+                  {editing && (
+                    <GradientButton text="Change Password" onPress={handleChangePassword} />
+                  )}
                 </View>
               </>
             )}
           </View>
-        
-      
-         {/* SOS SECTION */}
-         <View style={styles.card}>
-          <TouchableOpacity onPress={()=>toggleSection("sos")}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeader}>SOS Logs</Text>
-              <Ionicons name={expandedSections.sos?"arrow-up":"arrow-down"} size={20}/>
-            </View>
-          </TouchableOpacity>
-          {expandedSections.sos && (
-            
-            sosLogs.length === 0 ? (
-              <Text style={styles.emptyText}>No SOS recorded by user.</Text>
-            ) : (
-              sosLogs.map((item) => (
-                <SosItem key={item.id?.toString()} item={item} />
-              ))
-            )
-          )}
-        </View>
-            
-        {/* REPORT SECTION */}
-        <View style={styles.card}>
-          <TouchableOpacity onPress={()=>toggleSection("reports")}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeader}>Filed Incident Reports</Text>
-              <Ionicons name={expandedSections.reports?"arrow-up":"arrow-down"} size={20}/>
-            </View>
-          </TouchableOpacity>
-          {expandedSections.reports && (
-            incidentReports.length === 0 ? (
-              <Text style={styles.emptyText}>No incidents reported by user.</Text>
-            ) : (
-              incidentReports.map((item) => (
-                <ReportItem key={item.id?.toString()} item={item} />
-              ))
-            )
-          )}
-        </View>
 
-      </PageWrapper>
+
+          <View style={styles.card}>
+            <TouchableOpacity onPress={() => toggleSection("sos")}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionHeader}>SOS Logs</Text>
+                <Ionicons name={expandedSections.sos ? "arrow-up" : "arrow-down"} size={20} />
+              </View>
+            </TouchableOpacity>
+            {expandedSections.sos && (
+
+              sosLogs.length === 0 ? (
+                <Text style={styles.emptyText}>No SOS recorded by user.</Text>
+              ) : (
+                sosLogs.map((item) => (
+                  <SosItem key={item.id?.toString()} item={item} />
+                ))
+              )
+            )}
+          </View>
+
+          <View style={styles.card}>
+            <TouchableOpacity onPress={() => toggleSection("reports")}>
+              <View style={styles.sectionHeaderRow}>
+                <Text style={styles.sectionHeader}>Filed Incident Reports</Text>
+                <Ionicons name={expandedSections.reports ? "arrow-up" : "arrow-down"} size={20} />
+              </View>
+            </TouchableOpacity>
+            {expandedSections.reports && (
+              incidentReports.length === 0 ? (
+                <Text style={styles.emptyText}>No incidents reported by user.</Text>
+              ) : (
+                incidentReports.map((item) => (
+                  <ReportItem key={item.id?.toString()} item={item} />
+                ))
+              )
+            )}
+          </View>
+
+        </PageWrapper>
       </ScrollView>
-      <BottomNav navigation={navigation}/>
+      <BottomNav navigation={navigation} />
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  headerRow:{flexDirection:"row",alignItems:"center",marginBottom:14, padding:10},
-  profileImage:{width:84,height:84,borderRadius:18,backgroundColor:"#eee"},
-  userName:{fontSize:20,fontWeight:"700",color:"#111"},
-  userEmail:{color:"#666",marginTop:3},
-  editBtn:{backgroundColor:"#8B133E",padding:8,borderRadius:10},
-  card:{backgroundColor:"#fff",borderRadius:14,padding:16,marginBottom:18,elevation:3, marginTop:10},
+  headerRow: { flexDirection: "row", alignItems: "center", marginBottom: 14, padding: 10 },
+  profileImage: { width: 84, height: 84, borderRadius: 18, backgroundColor: "#eee" },
+  userName: { fontSize: 20, fontWeight: "700", color: "#111" },
+  userEmail: { color: "#666", marginTop: 3 },
+  editBtn: { backgroundColor: "#8B133E", padding: 8, borderRadius: 10 },
+  card: { backgroundColor: "#fff", borderRadius: 14, padding: 16, marginBottom: 18, elevation: 3, marginTop: 10 },
 
-  sectionHeaderRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginBottom:10},
-  sectionHeader:{fontSize:16,fontWeight:"700",color:"#8B133E"},
+  sectionHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  sectionHeader: { fontSize: 16, fontWeight: "700", color: "#8B133E" },
 
-  addContactBlock:{gap:10},
-  addContactInput:{backgroundColor:"#fff",borderRadius:10,padding:10,borderWidth:1,borderColor:"#fca5a5"},
-  addContactBlock:{marginTop:10,backgroundColor:"#fff4f8",padding:12,borderRadius:10,elevation:2},
+  addContactBlock: { gap: 10 },
+  addContactInput: { backgroundColor: "#fff", borderRadius: 10, padding: 10, borderWidth: 1, borderColor: "#fca5a5" },
+  addContactBlock: { marginTop: 10, backgroundColor: "#fff4f8", padding: 12, borderRadius: 10, elevation: 2 },
 
-  contactItem:{flexDirection:"row",padding:12,backgroundColor:"#fff1f2",borderRadius:12,alignItems:"center",borderWidth:1,borderColor:"#fca5a5"},
-  contactText:{fontSize:15,fontWeight:"600",color:"#333"},
-  relationshipBadge:{color:"#666",fontSize:13,fontWeight:"500"},
-  contactNumber:{marginTop:4,color:"#555"},
-  reportTime:{fontSize:11,color:"#777",fontWeight:"600",marginTop:6},
+  contactItem: { flexDirection: "row", padding: 12, backgroundColor: "#fff1f2", borderRadius: 12, alignItems: "center", borderWidth: 1, borderColor: "#fca5a5" },
+  contactText: { fontSize: 15, fontWeight: "600", color: "#333" },
+  relationshipBadge: { color: "#666", fontSize: 13, fontWeight: "500" },
+  contactNumber: { marginTop: 4, color: "#555" },
+  reportTime: { fontSize: 11, color: "#777", fontWeight: "600", marginTop: 6 },
 
-  reportItem:{flexDirection:"row",backgroundColor:"#fff4f8",padding:12,borderRadius:12,marginBottom:10,borderWidth:1,borderColor:"#fca5a5",alignItems:"center"},
-  sosItem:{flexDirection:"row",backgroundColor:"#ffe5ea",padding:12,borderRadius:12,marginBottom:10,borderWidth:1,borderColor:"#D72638",alignItems:"center"},
-  reportText:{fontWeight:"700",color:"#D72638",fontSize:15},
-  reportDesc:{fontSize:13,color:"#444",marginTop:4},
-  reportMeta:{fontSize:12,color:"#555",marginTop:4},
-  emptyText:{textAlign:"center",color:"#999",marginTop:10},
+  reportItem: { flexDirection: "row", backgroundColor: "#fff4f8", padding: 12, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: "#fca5a5", alignItems: "center" },
+  sosItem: { flexDirection: "row", backgroundColor: "#ffe5ea", padding: 12, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: "#D72638", alignItems: "center" },
+  reportText: { fontWeight: "700", color: "#D72638", fontSize: 15 },
+  reportDesc: { fontSize: 13, color: "#444", marginTop: 4 },
+  reportMeta: { fontSize: 12, color: "#555", marginTop: 4 },
+  emptyText: { textAlign: "center", color: "#999", marginTop: 10 },
   divider: {
     height: 2,
     backgroundColor: "#eee",
@@ -657,6 +621,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
     color: "#4A0D35",
-    marginBottom:10,
+    marginBottom: 10,
   },
 });

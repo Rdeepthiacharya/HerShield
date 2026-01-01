@@ -1,35 +1,31 @@
-# Core backend
+# Core backend dependencies
 Flask==3.0.3
 flask-cors==4.0.1
+flask-socketio==5.3.6
 mysql-connector-python==8.3.0
 Werkzeug==3.0.3
-rapidfuzz==3.9.6
-requests==2.32.3
-vosk==0.3.45
-librosa==0.10.2.post1
-numpy==1.26.4
-soundfile==0.12.1
-loguru==0.7.2
 python-dotenv==1.0.1
-torch==2.2.2
-torchaudio==2.2.2
-transformers==4.38.2
-speechbrain==1.0.3
-geopy==2.4.1
-python-dotenv==1.0.1
-geopy==2.4.1
+
+
+# Location and mapping
 geopy==2.4.1
 haversine==2.8.1
 networkx==3.3
-haversine==2.8.1
+
+# Utilities
+requests==2.32.3
+loguru==0.7.2
+python-dateutil==2.9.0.post0
+pyngrok==7.1.6
+psutil==5.9.8
+
+# Development and testing
 pytest==8.3.3
 black==24.8.0
 flake8==7.1.1
 mypy==1.11.2
-torch==2.2.2
-torchaudio==2.2.2
+
+# Data analysis (optional)
 matplotlib==3.8.4
 scipy==1.13.1
 scikit-learn==1.4.2
-geopy==2.4.1
-python-dotenv==1.0.1

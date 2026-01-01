@@ -33,9 +33,7 @@ CREATE TABLE sos_logs (
     user_id INT NOT NULL,
     TIMESTAMP DATETIME DEFAULT CURRENT_TIMESTAMP,
     trigger_type VARCHAR(50) NULL,   -- 'manual', 'auto', 'voice_auto', 'shake', etc.
-    latitude DECIMAL(10,7) NULL,
-    longitude DECIMAL(10,7) NULL,
-    location VARCHAR(255) NULL,      -- fallback string if GPS missing
+    location VARCHAR(255) NULL,     
     message TEXT NULL,               -- full SOS alert message
     recipients VARCHAR(255) NULL,    -- comma-separated phone numbers
     sms_status VARCHAR(50) NULL,     -- 'sent', 'delivered', 'failed', etc.

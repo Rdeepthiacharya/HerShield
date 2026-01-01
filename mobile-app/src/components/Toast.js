@@ -47,14 +47,38 @@ export default function Toast({
     return () => clearTimeout(timer);
   }, [duration]);
 
-  // --- Logic for Colors ---
-  const isSuccess = type === "success";
-  const successColor = "#059669"; // Green
-  const errorColor = "#DC2626"; // Red
+  // --- Logic for Colors and Types ---
+  const getToastConfig = () => {
+    switch (type) {
+      case "success":
+        return {
+          borderLeftColor: "#4CAF50", // Green
+          iconColor: "#4CAF50",
+          icon: "checkmark-circle"
+        };
+      case "error":
+        return {
+          borderLeftColor: "#F44336", // Red
+          iconColor: "#F44336",
+          icon: "close-circle"
+        };
+      case "warning":
+        return {
+          borderLeftColor: "#FF9800", // Orange
+          iconColor: "#FF9800",
+          icon: "warning"
+        };
+      case "info":
+      default:
+        return {
+          borderLeftColor: "#2196F3", // Blue
+          iconColor: "#2196F3",
+          icon: "information-circle"
+        };
+    }
+  };
 
-  const borderLeftColor = isSuccess ? successColor : errorColor;
-  const iconColor = isSuccess ? successColor : errorColor;
-  const icon = isSuccess ? "checkmark-circle" : "close-circle";
+  const { borderLeftColor, iconColor, icon } = getToastConfig();
 
   return (
     <Animated.View

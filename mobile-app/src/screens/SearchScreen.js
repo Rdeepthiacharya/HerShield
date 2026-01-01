@@ -22,7 +22,6 @@ export default function SearchScreen({ onClose, navigation, route }) {
   const [userLocation, setUserLocation] = useState(null);
   const [nearbyPlaces, setNearbyPlaces] = useState([]);
   const [placesLoading, setPlacesLoading] = useState(false);
-  
   const { startPoint, initialLocation } = route.params || {};
 
   useEffect(() => {
@@ -56,69 +55,62 @@ export default function SearchScreen({ onClose, navigation, route }) {
     }
   };
 
-  // Calculate distance between two coordinates in km
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Earth's radius in km
+    const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = 
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-      Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const distance = R * c;
     return distance;
   };
 
   const fetchNearbyPlaces = async () => {
     if (!userLocation) return;
-    
+
     setPlacesLoading(true);
     try {
       const { lat, lng } = userLocation;
-      
+
       console.log("Fetching nearby places for location:", lat, lng);
-      
-      // Create bounding box around user location (5km radius)
+
       const bbox = `${lng - 0.045},${lat - 0.045},${lng + 0.045},${lat + 0.045}`;
-      
-      // Fetch all places in parallel - WITH SPECIFIC QUERIES
+
       const [policeResults, busResults, hospitalResults, metroResults] = await Promise.all([
         fetchPlacesFromOSM("police station", bbox, 'police'),
-        fetchBusStopsComprehensive(lat, lng, bbox), // SPECIAL FUNCTION FOR BUS STOPS
+        fetchBusStopsComprehensive(lat, lng, bbox),
         fetchPlacesFromOSM("hospital", bbox, 'hospital'),
         isInBangaloreArea(lat, lng) ? fetchPlacesFromOSM("metro station", bbox, 'metro') : Promise.resolve([])
       ]);
-      
+
       console.log("API Results:", {
         police: policeResults.length,
         bus: busResults.length,
         hospital: hospitalResults.length,
         metro: metroResults.length
       });
-      
-      // Combine all results
+
       let allPlaces = [
         ...policeResults,
         ...busResults,
         ...hospitalResults,
         ...metroResults
       ];
-      
-      // Calculate distances
+
       allPlaces = allPlaces.map(place => ({
         ...place,
         distance: calculateDistance(lat, lng, parseFloat(place.lat), parseFloat(place.lon))
       }));
-      
-      // Filter to within 5km and sort by distance
+
       const nearbyPlaces = allPlaces
         .filter(place => place.distance <= 5)
         .sort((a, b) => a.distance - b.distance);
-      
+
       console.log("Nearby places found:", nearbyPlaces.length);
-      
-      // If no real places found, show estimated ones
+
       if (nearbyPlaces.length === 0) {
         console.log("No real places found, showing estimated");
         const estimatedPlaces = getEstimatedPlaces(lat, lng);
@@ -126,10 +118,9 @@ export default function SearchScreen({ onClose, navigation, route }) {
       } else {
         setNearbyPlaces(nearbyPlaces);
       }
-      
+
     } catch (error) {
       console.error("Nearby places error:", error);
-      // Show estimated places on error
       if (userLocation) {
         const estimatedPlaces = getEstimatedPlaces(userLocation.lat, userLocation.lng);
         setNearbyPlaces(estimatedPlaces);
@@ -139,41 +130,37 @@ export default function SearchScreen({ onClose, navigation, route }) {
     }
   };
 
-  // SPECIAL FUNCTION: Comprehensive bus stop search
   const fetchBusStopsComprehensive = async (lat, lng, bbox) => {
     try {
-      // Try multiple search terms for bus stops
       const searchTerms = [
         "bus stand",
-        "bus stop", 
+        "bus stop",
         "bus station",
         "bus depot",
         "BMTC",
         "KSRTC",
         "public transport"
       ];
-      
+
       const allBusResults = [];
-      
+
       for (const term of searchTerms) {
         try {
           const results = await fetchPlacesFromOSM(term, bbox, 'bus');
           if (results.length > 0) {
             console.log(`Found ${results.length} bus places for term: ${term}`);
             allBusResults.push(...results);
-            
-            // If we found enough results, break early
+
             if (allBusResults.length >= 8) break;
           }
         } catch (termError) {
           console.log(`Error searching for ${term}:`, termError);
         }
       }
-      
-      // Remove duplicates based on coordinates
+
       const uniqueBusStops = [];
       const seenCoords = new Set();
-      
+
       allBusResults.forEach(stop => {
         const coordKey = `${stop.lat}_${stop.lon}`;
         if (!seenCoords.has(coordKey)) {
@@ -181,56 +168,52 @@ export default function SearchScreen({ onClose, navigation, route }) {
           uniqueBusStops.push(stop);
         }
       });
-      
+
       console.log(`Total unique bus stops found: ${uniqueBusStops.length}`);
       return uniqueBusStops;
-      
+
     } catch (error) {
       console.error("Comprehensive bus search error:", error);
       return [];
     }
   };
 
-  // Fetch places from OpenStreetMap
   const fetchPlacesFromOSM = async (query, bbox, type) => {
     try {
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=10&bounded=1&viewbox=${bbox}&countrycodes=in&dedupe=1`;
-      
+
       console.log(`Fetching ${type} with query: ${query}`);
-      
+
       const response = await fetch(url, {
-        headers: { 
+        headers: {
           'User-Agent': 'HerShieldApp/1.0',
           'Accept-Language': 'en'
         }
       });
-      
+
       if (!response.ok) {
         console.log(`OSM API error for ${query}:`, response.status);
         return [];
       }
-      
+
       const data = await response.json();
       console.log(`OSM returned ${data.length} results for ${query}`);
-      
-      // Format the results with proper names
+
       return data.map(item => {
-        // Extract a clean name from display_name
+
         let displayName = item.display_name || query;
-        
-        // Remove country and state if they're at the end
+
         displayName = displayName
           .replace(/, Karnataka, India$/i, '')
           .replace(/, India$/i, '')
           .replace(/�/g, '')
           .trim();
-        
-        // If name is too long, shorten it
+
         const parts = displayName.split(',');
         if (parts.length > 3) {
           displayName = parts.slice(0, 3).join(',');
         }
-        
+
         return {
           place_id: item.place_id.toString(),
           lat: item.lat,
@@ -240,35 +223,30 @@ export default function SearchScreen({ onClose, navigation, route }) {
           original_name: item.display_name || query
         };
       });
-      
+
     } catch (error) {
       console.log(`OSM fetch error for ${query}:`, error);
       return [];
     }
   };
 
-  // Helper: Check if in Bangalore area (for metro)
   const isInBangaloreArea = (lat, lng) => {
     return lat > 12.8 && lat < 13.2 && lng > 77.4 && lng < 77.9;
   };
 
-  // Get estimated places as fallback
   const getEstimatedPlaces = (lat, lng) => {
     console.log("Generating estimated places");
     const places = [];
-    
-    // Common patterns for Karnataka
+
     const isUrban = isLikelyUrban(lat, lng);
-    
-    // Police stations
+
     const policeNames = [
       "Police Station",
-      "Local Police Station", 
+      "Local Police Station",
       "Police Outpost",
       "Traffic Police Station"
     ];
-    
-    // Bus stands/stops - SPECIFIC KARNATAKA NAMES
+
     const busNames = [
       "Bus Stand",
       "Bus Stop",
@@ -277,34 +255,30 @@ export default function SearchScreen({ onClose, navigation, route }) {
       "City Bus Stop",
       "Local Bus Stand"
     ];
-    
-    // Hospitals
+
     const hospitalNames = [
       "Government Hospital",
-      "General Hospital", 
+      "General Hospital",
       "Primary Health Centre",
       "Community Hospital",
       "Medical Center"
     ];
-    
-    // Metro stations (only if in Bangalore)
+
     const metroNames = [
       "Metro Station",
       "Namma Metro Station",
       "MRTS Station"
     ];
-    
-    // Generate estimated places
+
     if (isUrban) {
       console.log("Generating urban estimated places");
-      
-      // Police (3 places, ~2km apart)
+
       for (let i = 0; i < 3; i++) {
-        const offsetLat = (Math.random() * 0.02) - 0.01; // ~1km range
+        const offsetLat = (Math.random() * 0.02) - 0.01;
         const offsetLng = (Math.random() * 0.02) - 0.01;
         const placeLat = lat + offsetLat;
         const placeLng = lng + offsetLng;
-        
+
         places.push({
           place_id: `police_est_${i}`,
           lat: placeLat.toString(),
@@ -315,14 +289,13 @@ export default function SearchScreen({ onClose, navigation, route }) {
           isEstimated: true
         });
       }
-      
-      // Bus (4 places, ~500m apart) - MAKE SURE THESE ARE INCLUDED
+
       for (let i = 0; i < 4; i++) {
-        const offsetLat = (Math.random() * 0.01) - 0.005; // ~500m range
+        const offsetLat = (Math.random() * 0.01) - 0.005;
         const offsetLng = (Math.random() * 0.01) - 0.005;
         const placeLat = lat + offsetLat;
         const placeLng = lng + offsetLng;
-        
+
         places.push({
           place_id: `bus_est_${i}`,
           lat: placeLat.toString(),
@@ -333,14 +306,14 @@ export default function SearchScreen({ onClose, navigation, route }) {
           isEstimated: true
         });
       }
-      
-      // Hospitals (2 places, ~3km apart)
+
+
       for (let i = 0; i < 2; i++) {
-        const offsetLat = (Math.random() * 0.025) - 0.0125; // ~1.5km range
+        const offsetLat = (Math.random() * 0.025) - 0.0125;
         const offsetLng = (Math.random() * 0.025) - 0.0125;
         const placeLat = lat + offsetLat;
         const placeLng = lng + offsetLng;
-        
+
         places.push({
           place_id: `hospital_est_${i}`,
           lat: placeLat.toString(),
@@ -351,15 +324,14 @@ export default function SearchScreen({ onClose, navigation, route }) {
           isEstimated: true
         });
       }
-      
-      // Metro (only if in Bangalore)
+
       if (isInBangaloreArea(lat, lng)) {
         for (let i = 0; i < 2; i++) {
-          const offsetLat = (Math.random() * 0.03) - 0.015; // ~2km range
+          const offsetLat = (Math.random() * 0.03) - 0.015;
           const offsetLng = (Math.random() * 0.03) - 0.015;
           const placeLat = lat + offsetLat;
           const placeLng = lng + offsetLng;
-          
+
           places.push({
             place_id: `metro_est_${i}`,
             lat: placeLat.toString(),
@@ -372,14 +344,12 @@ export default function SearchScreen({ onClose, navigation, route }) {
         }
       }
     }
-    
-    // Sort by distance
+
     return places.sort((a, b) => a.distance - b.distance);
   };
 
-  // Helper: Check if location is likely urban
   const isLikelyUrban = (lat, lng) => {
-    // Check if near major Karnataka cities
+
     const majorCities = [
       { lat: 12.9716, lng: 77.5946 }, // Bangalore
       { lat: 12.2958, lng: 76.6394 }, // Mysore
@@ -387,8 +357,8 @@ export default function SearchScreen({ onClose, navigation, route }) {
       { lat: 15.3647, lng: 75.1240 }, // Hubli
       { lat: 15.8497, lng: 74.4977 }, // Belgaum
     ];
-    
-    return majorCities.some(city => 
+
+    return majorCities.some(city =>
       calculateDistance(lat, lng, city.lat, city.lng) < 30 // Within 30km of major city
     );
   };
@@ -405,24 +375,23 @@ export default function SearchScreen({ onClose, navigation, route }) {
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
         text
       )}&format=json&limit=8&countrycodes=in`;
-      
+
       const response = await fetch(url, {
-        headers: { 
+        headers: {
           'User-Agent': 'HerShieldApp/1.0',
           'Accept-Language': 'en'
         }
       });
-      
+
       const data = await response.json();
-      
-      // Filter and format results
+
       const filteredResults = data
         .filter(item => {
           const name = item.display_name || '';
-          return name.length > 5 && 
-                 !name.includes('�') && 
-                 !name.includes('??') &&
-                 name.match(/[a-zA-Z]/);
+          return name.length > 5 &&
+            !name.includes('�') &&
+            !name.includes('??') &&
+            name.match(/[a-zA-Z]/);
         })
         .map(item => ({
           ...item,
@@ -431,25 +400,24 @@ export default function SearchScreen({ onClose, navigation, route }) {
             .replace(/[^\x00-\x7F]/g, '')
             .trim()
         }));
-      
+
       setResults(filteredResults);
     } catch (error) {
       console.error("Search error:", error);
-      Alert.alert("Search Error", "Unable to search locations");
+      toast.showToast("Unable to search locations", "error");
     } finally {
       setLoading(false);
     }
   };
 
   const selectLocation = (item) => {
-    const coord = { 
-      lat: parseFloat(item.lat), 
-      lng: parseFloat(item.lon) 
+    const coord = {
+      lat: parseFloat(item.lat),
+      lng: parseFloat(item.lon)
     };
-    
+
     Keyboard.dismiss();
-    
-    // Navigate to route details
+
     navigation.navigate("RouteDetails", {
       start: startPoint,
       end: coord,
@@ -465,7 +433,7 @@ export default function SearchScreen({ onClose, navigation, route }) {
 
   const renderNearbyPlace = (place) => {
     const getIcon = (type) => {
-      switch(type) {
+      switch (type) {
         case 'police': return { name: 'shield', color: '#FF3B30' };
         case 'bus': return { name: 'bus', color: '#007AFF' };
         case 'hospital': return { name: 'medical', color: '#4CAF50' };
@@ -507,15 +475,14 @@ export default function SearchScreen({ onClose, navigation, route }) {
     );
   };
 
-  // Group places by type in SPECIFIC ORDER: Police → Bus → Hospital → Metro
   const policeStations = nearbyPlaces.filter(p => p.type === 'police').slice(0, 3);
-  const busStands = nearbyPlaces.filter(p => p.type === 'bus').slice(0, 4); // Show more bus stops
+  const busStands = nearbyPlaces.filter(p => p.type === 'bus').slice(0, 4);
   const hospitals = nearbyPlaces.filter(p => p.type === 'hospital').slice(0, 2);
   const metroStations = nearbyPlaces.filter(p => p.type === 'metro').slice(0, 2);
 
   return (
     <View style={styles.container}>
-      <AppHeader 
+      <AppHeader
         title="Search Destination"
         showBack={true}
         onBack={onClose}
@@ -523,7 +490,7 @@ export default function SearchScreen({ onClose, navigation, route }) {
         showProfile={false}
       />
 
-      {/* Search Bar */}
+
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
         <TextInput
@@ -571,7 +538,7 @@ export default function SearchScreen({ onClose, navigation, route }) {
           style={styles.resultsFlatList}
         />
       ) : (
-        <ScrollView 
+        <ScrollView
           style={styles.scrollContainer}
           showsVerticalScrollIndicator={true}
           contentContainerStyle={styles.scrollContent}
@@ -585,8 +552,7 @@ export default function SearchScreen({ onClose, navigation, route }) {
             <>
               <Text style={styles.suggestionsTitle}>Nearby Important Locations</Text>
               <Text style={styles.suggestionsSubtitle}>Within 5km of your location</Text>
-              
-              {/* Police Stations - FIRST */}
+
               {policeStations.length > 0 && (
                 <>
                   <View style={styles.placeTypeHeader}>
@@ -597,9 +563,8 @@ export default function SearchScreen({ onClose, navigation, route }) {
                   {policeStations.map(renderNearbyPlace)}
                 </>
               )}
-              
-              {/* Bus Stands - SECOND - CHECK IF THIS SHOWS */}
-              {busStands.length > 0 ? (
+
+              {busStands.length > 0 && (
                 <>
                   <View style={styles.placeTypeHeader}>
                     <Ionicons name="bus" size={18} color="#007AFF" />
@@ -608,14 +573,8 @@ export default function SearchScreen({ onClose, navigation, route }) {
                   </View>
                   {busStands.map(renderNearbyPlace)}
                 </>
-              ) : (
-                <View style={styles.noCategoryContainer}>
-                  <Ionicons name="bus" size={24} color="#ccc" />
-                  <Text style={styles.noCategoryText}>No bus stops found nearby</Text>
-                </View>
               )}
-              
-              {/* Hospitals - THIRD */}
+
               {hospitals.length > 0 && (
                 <>
                   <View style={styles.placeTypeHeader}>
@@ -626,8 +585,7 @@ export default function SearchScreen({ onClose, navigation, route }) {
                   {hospitals.map(renderNearbyPlace)}
                 </>
               )}
-              
-              {/* Metro Stations - FOURTH */}
+
               {metroStations.length > 0 && (
                 <>
                   <View style={styles.placeTypeHeader}>
@@ -638,8 +596,7 @@ export default function SearchScreen({ onClose, navigation, route }) {
                   {metroStations.map(renderNearbyPlace)}
                 </>
               )}
-              
-              {/* Show message if no places found */}
+
               {nearbyPlaces.length === 0 && !placesLoading && (
                 <View style={styles.noPlacesContainer}>
                   <Ionicons name="location-outline" size={40} color="#ccc" />

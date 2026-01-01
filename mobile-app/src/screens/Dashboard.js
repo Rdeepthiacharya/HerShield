@@ -74,13 +74,13 @@ export default function Dashboard({ navigation }) {
 
   return (
     <>
-      <AppHeader title="HerShield" 
+      <AppHeader title="HerShield"
       // logoSource={require("../assets/icon/app-favicon.png")}
       />
 
       <PageWrapper loading={loading}>
         <View style={styles.container}>
-          <ScreenHeader  title={ <Text>Welcome back, {"\n"} {userName || "User"}</Text>} />
+          <ScreenHeader title={<Text>Welcome back, {"\n"} {userName || "User"}</Text>} />
 
           {/* SOS */}
           <View style={styles.centerArea}>
@@ -137,7 +137,7 @@ export default function Dashboard({ navigation }) {
                     </View>
 
                     <Text style={styles.contactPreviewText}>
-                      {c.contact_name} — {c.mobile_number}
+                      {c.contact_name}
                     </Text>
                   </View>
                 ))
@@ -171,7 +171,7 @@ const styles = StyleSheet.create({
 
   container: { paddingHorizontal: 20 },
   /* SOS */
-  centerArea: { alignItems: "center"},
+  centerArea: { alignItems: "center" },
   sosButton: { alignSelf: "center" },
   sosGradient: {
     width: 180,

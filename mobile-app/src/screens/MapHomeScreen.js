@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { 
-  View, 
-  TouchableOpacity, 
-  Alert, 
+import {
+  View,
+  TouchableOpacity,
+  Alert,
   Text,
   StyleSheet,
   Dimensions,
@@ -18,13 +18,17 @@ import AppHeader from "../components/AppHeader";
 import BottomNav from "../components/BottomNav";
 import PageWrapper from "../components/PageWrapper";
 import { RouteService } from '../services/RouteService';
+import { useToast } from "../context/ToastContext";
 import { BASE_URL } from "../utils/config";
+import { GEOAPIFY_KEY } from "../utils/config";
+import { AppState } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
 export default function MapHomeScreen({ navigation, route }) {
   const webRef = useRef(null);
   const [loading, setLoading] = useState(false);
+  const { showToast } = useToast();
   const [start, setStart] = useState(null);
   const [end, setEnd] = useState(null);
   const [userLocation, setUserLocation] = useState(null);
@@ -34,18 +38,16 @@ export default function MapHomeScreen({ navigation, route }) {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [destinationName, setDestinationName] = useState("");
 
-  // Check if end point was passed from Search screen
   useEffect(() => {
     if (route.params?.end) {
       setEnd(route.params.end);
       setDestinationName(route.params.locationName || "Destination");
-      
-      // Send end marker to WebView
+
       if (webRef.current && mapLoaded) {
         webRef.current.postMessage(
-          JSON.stringify({ 
-            type: "setEnd", 
-            coord: route.params.end 
+          JSON.stringify({
+            type: "setEnd",
+            coord: route.params.end
           })
         );
       }
@@ -123,7 +125,7 @@ export default function MapHomeScreen({ navigation, route }) {
 <body>
 <div id="map"></div>
 <script>
-  const API_KEY = "01e115490b5549cc9eff64708491d30e";
+  const API_KEY = "${GEOAPIFY_KEY}";
   let map = new maplibregl.Map({
     container: "map",
     style: "https://maps.geoapify.com/v1/styles/osm-bright/style.json?apiKey=" + API_KEY,
@@ -131,17 +133,14 @@ export default function MapHomeScreen({ navigation, route }) {
     zoom: 11,
     attributionControl: false
   });
-  
-  // Store markers for later reference
+
   let markers = [];
   let startMarker = null;
   let endMarker = null;
-  
-  // Function to add incident markers
+
   function addIncidentMarkers(incidents) {
     console.log('WebView: Adding', incidents?.length, 'incident markers');
-    
-    // Clear existing incident markers
+
     markers.forEach(marker => marker.remove());
     markers = [];
     
@@ -151,27 +150,24 @@ export default function MapHomeScreen({ navigation, route }) {
     }
     
     incidents.forEach(incident => {
-      // Determine marker class based on severity and verification
       let markerClass = "incident-marker";
       if (incident.is_verified) markerClass += " verified";
       if (incident.severity >= 3) markerClass += " high-severity";
       else if (incident.severity === 2) markerClass += " medium-severity";
       else markerClass += " low-severity";
       
-      // Create marker element
+
       const el = document.createElement('div');
       el.className = markerClass;
       el.title = incident.incident_type;
-      
-      // Create marker
+
       const marker = new maplibregl.Marker({
         element: el,
         anchor: 'center'
       })
         .setLngLat([incident.longitude, incident.latitude])
         .addTo(map);
-      
-      // Add click event for popup
+
       const popup = new maplibregl.Popup({
         offset: 25,
         closeButton: false,
@@ -191,8 +187,7 @@ export default function MapHomeScreen({ navigation, route }) {
     
     console.log('WebView: Successfully added', markers.length, 'incident markers');
   }
-  
-  // Listen for messages from React Native
+
   document.addEventListener("message", function(event) {
     console.log('WebView: Received message:', event.data);
     try {
@@ -225,8 +220,7 @@ export default function MapHomeScreen({ navigation, route }) {
         markers.forEach(marker => marker.remove());
         markers = [];
       }
-      
-      // Send response back to React Native
+
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(
           JSON.stringify({ 
@@ -240,8 +234,7 @@ export default function MapHomeScreen({ navigation, route }) {
       console.error("WebView: Error processing message:", err);
     }
   });
-  
-  // Map click event
+
   map.on("click", function(e) {
     console.log('WebView: Map clicked at', e.lngLat);
     if (window.ReactNativeWebView) {
@@ -253,8 +246,7 @@ export default function MapHomeScreen({ navigation, route }) {
       );
     }
   });
-  
-  // Load incidents when map is ready
+
   map.on("load", function() {
     console.log('WebView: Map loaded');
     if (window.ReactNativeWebView) {
@@ -266,17 +258,36 @@ export default function MapHomeScreen({ navigation, route }) {
 </script>
 </body>
 </html>`;
+  const incidentsFetched = useRef(false);
 
   useEffect(() => {
     loadUserId();
     requestLocation();
-    fetchIncidents();
-    
-    // Set up interval to refresh incidents every 2 minutes
-    const interval = setInterval(fetchIncidents, 120000);
-    
-    return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state !== 'active') return;
+      fetchIncidents();
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
+    loadUserId();
+    requestLocation();
+  }, []);
+
+  useEffect(() => {
+    if (!mapLoaded) return;
+
+    fetchIncidents();
+
+    const interval = setInterval(fetchIncidents, 120000);
+    return () => clearInterval(interval);
+  }, [mapLoaded]);
+
 
   const loadUserId = async () => {
     try {
@@ -293,24 +304,24 @@ export default function MapHomeScreen({ navigation, route }) {
   const fetchIncidents = async () => {
     try {
       console.log("Fetching incidents from:", `${BASE_URL}/incidents/recent`);
-      
+
       const response = await fetch(`${BASE_URL}/incidents/recent`);
-      
+
       if (response.ok) {
         const data = await response.json();
         console.log("Incidents API response:", data);
-        
+
         if (data.success && data.incidents) {
           setIncidents(data.incidents);
           setIncidentsCount(data.incidents.length);
-          
+
           // Send incidents to WebView
           if (webRef.current && mapLoaded) {
             console.log("Sending incidents to WebView:", data.incidents.length);
             webRef.current.postMessage(
-              JSON.stringify({ 
-                type: "addIncidents", 
-                incidents: data.incidents 
+              JSON.stringify({
+                type: "addIncidents",
+                incidents: data.incidents
               })
             );
           } else {
@@ -341,23 +352,23 @@ export default function MapHomeScreen({ navigation, route }) {
         console.log("No user ID for fallback");
         return;
       }
-      
+
       console.log("Fetching user incidents for ID:", userId);
       const response = await fetch(`${BASE_URL}/incident_reports/${userId}`);
-      
+
       if (response.ok) {
         const data = await response.json();
         console.log("User incidents response:", data);
-        
+
         if (data.success && data.reports) {
           setIncidents(data.reports);
           setIncidentsCount(data.count);
-          
+
           if (webRef.current && mapLoaded) {
             webRef.current.postMessage(
-              JSON.stringify({ 
-                type: "addIncidents", 
-                incidents: data.reports 
+              JSON.stringify({
+                type: "addIncidents",
+                incidents: data.reports
               })
             );
           }
@@ -371,32 +382,26 @@ export default function MapHomeScreen({ navigation, route }) {
   const requestLocation = async () => {
     try {
       setLoading(true);
-      
+
       // Check if permission already granted
       let { status } = await Location.getForegroundPermissionsAsync();
-      
+
       // If not granted, request permission
       if (status !== 'granted') {
         const { status: newStatus } = await Location.requestForegroundPermissionsAsync();
         status = newStatus;
       }
-      
+
       if (status !== 'granted') {
-        Alert.alert(
-          'Location Permission Required',
-          'HerShield needs your location to show safe routes and nearby incidents.',
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-            },
-            {
-              text: 'Open Settings',
-              onPress: () => Linking.openSettings(),
-            },
-          ]
+        showToast(
+          "Location permission required to show safe routes and incidents",
+          "warning"
         );
-        
+
+        // Optional: auto-open settings after short delay
+        setTimeout(() => Linking.openSettings(), 1200);
+
+
         // Set default location if permission denied
         const defaultCoord = { lat: 12.9716, lng: 77.5946 };
         setUserLocation(defaultCoord);
@@ -408,21 +413,14 @@ export default function MapHomeScreen({ navigation, route }) {
       // Check if location services are enabled
       const servicesEnabled = await Location.hasServicesEnabledAsync();
       if (!servicesEnabled) {
-        Alert.alert(
-          'Location Services Disabled',
-          'Please enable location services on your device.',
-          [
-            {
-              text: 'Cancel',
-              style: 'cancel',
-            },
-            {
-              text: 'Open Settings',
-              onPress: () => Linking.openSettings(),
-            },
-          ]
+        showToast(
+          "Location services are disabled. Please enable GPS.",
+          "warning"
         );
-        
+
+        setTimeout(() => Linking.openSettings(), 1200);
+
+
         // Set default location if services disabled
         const defaultCoord = { lat: 12.9716, lng: 77.5946 };
         setUserLocation(defaultCoord);
@@ -436,28 +434,30 @@ export default function MapHomeScreen({ navigation, route }) {
         accuracy: Location.Accuracy.Balanced,
         timeout: 10000, // 10 second timeout
       });
-      
+
       const coord = { lat: loc.coords.latitude, lng: loc.coords.longitude };
       console.log("Got user location:", coord);
       setUserLocation(coord);
       setStart(coord);
       sendStartLocation(coord);
-      
+
     } catch (error) {
       console.error("Location error:", error);
-      
+
       if (error.code === 'E_LOCATION_SETTINGS_UNSATISFIED') {
-        Alert.alert(
-          'Location Error',
-          'Location services are not available or inadequate.',
+        showToast(
+          "Unable to access location services",
+          "error"
         );
+
       } else if (error.code === 'E_LOCATION_TIMEOUT') {
-        Alert.alert(
-          'Location Timeout',
-          'Getting your location took too long.',
+        showToast(
+          "Location request timed out. Please try again.",
+          "error"
         );
+
       }
-      
+
       // Set default location on error
       const defaultCoord = { lat: 12.9716, lng: 77.5946 };
       setUserLocation(defaultCoord);
@@ -480,26 +480,26 @@ export default function MapHomeScreen({ navigation, route }) {
   // NEW FUNCTION: Handle showing safe routes
   const handleShowRoutes = async () => {
     if (!start || !end) {
-      Alert.alert("Error", "Please select both start and end points");
+      showToast("Please select both start and end points", "error");
       return;
     }
 
     try {
       setLoading(true);
-      
+
       // Convert coordinates to required format
-      const startCoords = { 
-        latitude: start.lat, 
-        longitude: start.lng 
+      const startCoords = {
+        latitude: start.lat,
+        longitude: start.lng
       };
-      const endCoords = { 
-        latitude: end.lat, 
-        longitude: end.lng 
+      const endCoords = {
+        latitude: end.lat,
+        longitude: end.lng
       };
-      
+
       // Fetch multiple routes using RouteService
       const result = await RouteService.getMultipleRoutes(startCoords, endCoords);
-      
+
       if (result.success && result.routes.length > 0) {
         // Navigate to RouteDetails screen with all routes
         navigation.navigate("RouteDetails", {
@@ -511,7 +511,7 @@ export default function MapHomeScreen({ navigation, route }) {
       } else {
         // Fallback to single route if multiple routes not available
         const singleResult = await RouteService.getSingleRoute(startCoords, endCoords);
-        
+
         if (singleResult.success) {
           navigation.navigate("RouteDetails", {
             routes: [singleResult.route], // Wrap in array for compatibility
@@ -520,12 +520,12 @@ export default function MapHomeScreen({ navigation, route }) {
             locationName: destinationName || "Your Destination"
           });
         } else {
-          Alert.alert("Route Error", "Could not find any safe routes to this destination.");
+          showToast("Could not find any safe routes to this destination", "error");
         }
       }
     } catch (error) {
       console.error("Route calculation error:", error);
-      Alert.alert("Error", "Failed to calculate routes. Please check your connection and try again.");
+      showToast("Failed to calculate routes. Please check your connection and try again", "error");
     } finally {
       setLoading(false);
     }
@@ -535,55 +535,53 @@ export default function MapHomeScreen({ navigation, route }) {
   const handleClearDestination = () => {
     setEnd(null);
     setDestinationName("");
-    
+
     // Clear end marker from WebView
     if (webRef.current && mapLoaded) {
-      // We can't directly remove the marker from React Native,
-      // but we'll handle it by not showing the route button
     }
-    
-    Alert.alert("Destination Cleared", "You can select a new destination.");
+
+    showToast("Destination cleared. You can select a new destination", "info");
   };
 
   const onWebViewMessage = (event) => {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       console.log("React Native: Received from WebView:", msg.type);
-      
+
       if (msg.type === "mapClick") {
         // Navigate to Search screen with clicked location
-        navigation.navigate("Search", { 
+        navigation.navigate("Search", {
           initialLocation: msg.coord,
-          startPoint: start 
+          startPoint: start
         });
       }
-      
+
       if (msg.type === "mapLoaded") {
         console.log("React Native: Map loaded");
         setMapLoaded(true);
-        
+
         // Send current location if we have it
         if (userLocation) {
           sendStartLocation(userLocation);
         }
-        
+
         // Send end location if we have it
         if (end) {
           webRef.current.postMessage(
-            JSON.stringify({ 
-              type: "setEnd", 
-              coord: end 
+            JSON.stringify({
+              type: "setEnd",
+              coord: end
             })
           );
         }
-        
+
         // Send incidents if we have them
         if (incidents.length > 0) {
           console.log("Sending existing incidents to newly loaded map");
           webRef.current.postMessage(
-            JSON.stringify({ 
-              type: "addIncidents", 
-              incidents 
+            JSON.stringify({
+              type: "addIncidents",
+              incidents
             })
           );
         } else {
@@ -592,11 +590,11 @@ export default function MapHomeScreen({ navigation, route }) {
           fetchIncidents();
         }
       }
-      
+
       if (msg.type === "acknowledge") {
         console.log("WebView acknowledged:", msg.received);
       }
-      
+
     } catch (err) {
       console.error("React Native: WebView message error:", err);
     }
@@ -605,7 +603,7 @@ export default function MapHomeScreen({ navigation, route }) {
   const handleRefreshIncidents = async () => {
     setLoading(true);
     await fetchIncidents();
-    Alert.alert("Incidents Refreshed", `Loaded ${incidentsCount} incidents in your area`);
+    showToast(`Loaded ${incidentsCount} incidents in your area`, "success");
     setLoading(false);
   };
 
@@ -614,7 +612,7 @@ export default function MapHomeScreen({ navigation, route }) {
       // If you have an IncidentList screen
       navigation.navigate("IncidentList", { incidents });
     } else {
-      Alert.alert("No Incidents", "No incidents reported in your area yet.");
+      showToast("No incidents reported in your area yet", "info");
     }
   };
 
@@ -622,10 +620,10 @@ export default function MapHomeScreen({ navigation, route }) {
     <>
       <AppHeader title="HerShield" />
       <PageWrapper loading={loading} scrollEnabled={false}>
-        <View style={{ flex: 1 }}>
-          
+        <View style={{ flex: 1, marginTop: -30 }}>
+
           {/* Search Bar */}
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => navigation.navigate("Search", { startPoint: start })}
             style={styles.searchBar}
             activeOpacity={0.8}
@@ -634,9 +632,9 @@ export default function MapHomeScreen({ navigation, route }) {
             <Text style={styles.searchPlaceholder}>
               {end ? destinationName : "Search destination"}
             </Text>
-            
+
             {/* Incident Badge */}
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={handleViewIncidentDetails}
               style={styles.incidentBadgeContainer}
             >
@@ -648,7 +646,7 @@ export default function MapHomeScreen({ navigation, route }) {
           </TouchableOpacity>
 
           {/* Current Location Button */}
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={requestLocation}
             style={styles.myLocationButton}
           >
@@ -656,7 +654,7 @@ export default function MapHomeScreen({ navigation, route }) {
           </TouchableOpacity>
 
           {/* Refresh Incidents Button */}
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={handleRefreshIncidents}
             style={styles.refreshButton}
           >
@@ -666,7 +664,7 @@ export default function MapHomeScreen({ navigation, route }) {
           {/* Route Action Button - Only show when destination is selected */}
           {end && (
             <View style={styles.routeButtonsContainer}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={handleShowRoutes}
                 style={styles.routeButton}
                 disabled={loading}
@@ -676,8 +674,8 @@ export default function MapHomeScreen({ navigation, route }) {
                   {loading ? "Calculating..." : "Show Safe Routes"}
                 </Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 onPress={handleClearDestination}
                 style={styles.clearDestinationButton}
               >
@@ -703,7 +701,10 @@ export default function MapHomeScreen({ navigation, route }) {
             javaScriptEnabled={true}
             domStorageEnabled={true}
             style={{ flex: 1 }}
+            mixedContentMode="always"
             originWhitelist={["*"]}
+            allowFileAccess={true}
+            allowUniversalAccessFromFileURLs={true}
             onMessage={onWebViewMessage}
             onError={(error) => console.error("WebView error:", error)}
             onLoadEnd={() => console.log("WebView loaded")}

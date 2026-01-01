@@ -1,4 +1,6 @@
-const API_URL = "http://YOUR_BACKEND_IP:5000"; // Change this to your actual backend URL
+import { BASE_URL } from "../utils/config";
+
+const API_URL = BASE_URL;
 
 export class RouteService {
   static async getMultipleRoutes(startCoords, endCoords) {
