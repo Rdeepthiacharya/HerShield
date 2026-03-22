@@ -25,14 +25,12 @@ export default function App() {
   const [initialRoute, setInitialRoute] = useState(null);
   const navigationRef = useRef();
 
-  // Load fonts using useFonts hook - for @expo/vector-icons
   const [fontsLoaded, fontError] = useFonts({
     ...Ionicons.font,
     ...MaterialIcons.font,
     ...Feather.font,
   });
 
-  // Log font loading status
   useEffect(() => {
     if (fontError) {
       console.error("❌ Font loading error:", fontError);
@@ -42,7 +40,6 @@ export default function App() {
     }
   }, [fontsLoaded, fontError]);
 
-  // Decide initial navigation screen
   useEffect(() => {
     if (!fontsLoaded) return;
 
@@ -52,12 +49,11 @@ export default function App() {
         setInitialRoute(stored ? "Dashboard" : "Welcome");
       } catch (error) {
         console.error("AsyncStorage error:", error);
-        setInitialRoute("Welcome"); // Default fallback
+        setInitialRoute("Welcome");
       }
     })();
   }, [fontsLoaded]);
 
-  // Show loading while fonts load or determining initial route
   if (!fontsLoaded || !initialRoute) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#fff" }}>

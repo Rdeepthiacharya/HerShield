@@ -74,9 +74,6 @@ export default function SearchScreen({ onClose, navigation, route }) {
     setPlacesLoading(true);
     try {
       const { lat, lng } = userLocation;
-
-      console.log("Fetching nearby places for location:", lat, lng);
-
       const bbox = `${lng - 0.045},${lat - 0.045},${lng + 0.045},${lat + 0.045}`;
 
       const [policeResults, busResults, hospitalResults, metroResults] = await Promise.all([
@@ -148,7 +145,6 @@ export default function SearchScreen({ onClose, navigation, route }) {
         try {
           const results = await fetchPlacesFromOSM(term, bbox, 'bus');
           if (results.length > 0) {
-            console.log(`Found ${results.length} bus places for term: ${term}`);
             allBusResults.push(...results);
 
             if (allBusResults.length >= 8) break;
@@ -169,7 +165,6 @@ export default function SearchScreen({ onClose, navigation, route }) {
         }
       });
 
-      console.log(`Total unique bus stops found: ${uniqueBusStops.length}`);
       return uniqueBusStops;
 
     } catch (error) {
@@ -181,8 +176,6 @@ export default function SearchScreen({ onClose, navigation, route }) {
   const fetchPlacesFromOSM = async (query, bbox, type) => {
     try {
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=10&bounded=1&viewbox=${bbox}&countrycodes=in&dedupe=1`;
-
-      console.log(`Fetching ${type} with query: ${query}`);
 
       const response = await fetch(url, {
         headers: {
@@ -197,7 +190,6 @@ export default function SearchScreen({ onClose, navigation, route }) {
       }
 
       const data = await response.json();
-      console.log(`OSM returned ${data.length} results for ${query}`);
 
       return data.map(item => {
 
@@ -458,13 +450,6 @@ export default function SearchScreen({ onClose, navigation, route }) {
           <Text style={styles.placeTitle} numberOfLines={1}>
             {place.display_name}
           </Text>
-          <View style={styles.placeFooter}>
-            {place.isEstimated ? (
-              <Text style={styles.estimatedBadge}>Estimated</Text>
-            ) : (
-              <Text style={styles.verifiedBadge}>Verified</Text>
-            )}
-          </View>
         </View>
         <View style={styles.distanceContainer}>
           <Text style={styles.distanceText}>
@@ -550,7 +535,7 @@ export default function SearchScreen({ onClose, navigation, route }) {
             </View>
           ) : (
             <>
-              <Text style={styles.suggestionsTitle}>Nearby Important Locations</Text>
+              <Text style={styles.suggestionsTitle}>Nearby Locations</Text>
               <Text style={styles.suggestionsSubtitle}>Within 5km of your location</Text>
 
               {policeStations.length > 0 && (
@@ -772,28 +757,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
     color: "#333",
     marginBottom: 4,
-  },
-  placeFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  estimatedBadge: {
-    fontSize: 11,
-    color: "#FF9800",
-    backgroundColor: "#FFF3E0",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    overflow: "hidden",
-  },
-  verifiedBadge: {
-    fontSize: 11,
-    color: "#4CAF50",
-    backgroundColor: "#E8F5E9",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    overflow: "hidden",
   },
   distanceContainer: {
     backgroundColor: "#f8f9fa",

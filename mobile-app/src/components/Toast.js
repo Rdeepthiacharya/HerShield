@@ -12,7 +12,6 @@ export default function Toast({
   const slideUp = useRef(new Animated.Value(100)).current;
 
   useEffect(() => {
-    // 1. Animate In
     Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,
@@ -26,7 +25,6 @@ export default function Toast({
       }),
     ]).start();
 
-    // 2. Animate Out after duration
     const timer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(opacity, {
@@ -98,11 +96,9 @@ export default function Toast({
 const styles = StyleSheet.create({
   container: {
     position: "absolute",
-    // FIX 1: Move it down (avoid logo)
     top: 100,
     left: 0,
     right: 0,
-    // FIX 2: Align to the right side
     alignItems: "flex-end",
     zIndex: 9999,
   },
@@ -110,14 +106,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#fff",
-    // FIX 3: Add right margin so it's not sticking to the edge
     marginRight: 20,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 8,
-    // Border styling
     borderLeftWidth: 5,
-    // Shadow for depth
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,

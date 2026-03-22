@@ -266,11 +266,6 @@ export default function ReportScreen({ navigation }) {
                       {selectedLocationData.method === 'live' ? 'Current Location' :
                         selectedLocationData.method === 'search' ? 'Searched' : 'Map Selected'}
                     </Text>
-                    {selectedLocationData.isInKarnataka && (
-                      <View style={styles.karnatakaBadge}>
-                        <Text style={styles.karnatakaBadgeText}>✓ Karnataka</Text>
-                      </View>
-                    )}
                   </View>
                 )}
               </View>
@@ -447,18 +442,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#4CAF50',
     fontWeight: '500',
-  },
-  karnatakaBadge: {
-    backgroundColor: '#4CAF50',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginLeft: 'auto',
-  },
-  karnatakaBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
   },
   pickerWrapper: {
     borderWidth: 1,

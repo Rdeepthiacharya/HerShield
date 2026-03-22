@@ -40,9 +40,6 @@ mobile-app/android/
 mobile-app/.gradle/
 mobile-app/.idea/
 
-# iOS folders (if ever created)
-mobile-app/ios/
-
 # RN artifacts
 *.apk
 *.aab
@@ -99,10 +96,8 @@ test-results/
 junit.xml
 
 #PACKAGE MANAGERS--------------
-# Uncomment if you want to ignore lock files
 # package-lock.json
-# yarn.lock
-# pnpm-lock.yaml
+
 
 #MISC / CACHE--------------
 .cache/

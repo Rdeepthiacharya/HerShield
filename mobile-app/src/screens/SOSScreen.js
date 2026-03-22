@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   View,
   Text,
@@ -9,9 +10,11 @@ import {
   Linking,
   Share,
   ScrollView,
+  Animated,
 } from "react-native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Audio } from "expo-av";
 import * as Location from "expo-location";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -36,10 +39,65 @@ export default function SOSScreen({ navigation }) {
   const [isSharingLiveLocation, setIsSharingLiveLocation] = useState(false);
   const [trackingUrl, setTrackingUrl] = useState("");
   const [currentLocation, setCurrentLocation] = useState(null);
-
+  const [isPanicAlarmPlaying, setIsPanicAlarmPlaying] = useState(false);
+  const [isNavigationTrackingActive, setIsNavigationTrackingActive] = useState(false);
+  const [navigationTrackingUrl, setNavigationTrackingUrl] = useState("");
 
   const intervalRef = useRef(null);
   const locationIntervalRef = useRef(null);
+  const panicScale = useRef(new Animated.Value(1)).current;
+  const panicSoundRef = useRef(null);
+
+  const stopPanicAlarm = async () => {
+    const sound = panicSoundRef.current;
+    panicSoundRef.current = null;
+    setIsPanicAlarmPlaying(false);
+    if (!sound) return;
+    try {
+      await sound.stopAsync();
+      await sound.unloadAsync();
+    } catch {
+      try {
+        await sound.unloadAsync();
+      } catch { }
+    }
+  };
+
+  const togglePanicAlarm = async () => {
+    if (panicSoundRef.current) {
+      await stopPanicAlarm();
+      return;
+    }
+    try {
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+      });
+      const { sound } = await Audio.Sound.createAsync(
+        require("../../assets/sound/police-siren.mp3"),
+        { isLooping: true }
+      );
+      panicSoundRef.current = sound;
+      await sound.playAsync();
+      setIsPanicAlarmPlaying(true);
+    } catch (e) {
+      panicSoundRef.current = null;
+      setIsPanicAlarmPlaying(false);
+      console.warn("Panic sound:", e);
+      toast.showToast("Could not play alarm", "error");
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      const sound = panicSoundRef.current;
+      if (sound) {
+        sound.stopAsync().catch(() => { });
+        sound.unloadAsync().catch(() => { });
+        panicSoundRef.current = null;
+      }
+    };
+  }, []);
 
 
   useEffect(() => {
@@ -48,6 +106,48 @@ export default function SOSScreen({ navigation }) {
       if (stored) setUser(JSON.parse(stored));
     })();
   }, []);
+
+  const refreshNavigationTracking = useCallback(async () => {
+    try {
+      const stored = await AsyncStorage.getItem("active_tracking_session");
+      if (!stored) {
+        setIsNavigationTrackingActive(false);
+        setNavigationTrackingUrl("");
+        return;
+      }
+      const session = JSON.parse(stored);
+      if (session.expires_at) {
+        const now = Date.now();
+        const expiry = new Date(session.expires_at).getTime();
+        if (now >= expiry) {
+          await AsyncStorage.removeItem("active_tracking_session");
+          await AsyncStorage.setItem("isSharing", "false");
+          setIsNavigationTrackingActive(false);
+          setNavigationTrackingUrl("");
+          return;
+        }
+      }
+      setIsNavigationTrackingActive(true);
+      setNavigationTrackingUrl(session.tracking_url || "");
+    } catch {
+      setIsNavigationTrackingActive(false);
+      setNavigationTrackingUrl("");
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshNavigationTracking();
+    }, [refreshNavigationTracking])
+  );
+
+  useEffect(() => {
+    if (!isNavigationTrackingActive) return;
+    const id = setInterval(() => {
+      refreshNavigationTracking();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [isNavigationTrackingActive, refreshNavigationTracking]);
 
   const getCurrentLocation = async () => {
     try {
@@ -186,10 +286,6 @@ export default function SOSScreen({ navigation }) {
 📍 LIVE TRACKING:
 ${trackingUrl}
 
-• Real-time updates
-• Shows exact movement
-• Works in any browser
-
 🚨 URGENT - Please check immediately!
 
 Sent via HerShield App`;
@@ -271,7 +367,7 @@ Sent via HerShield App`;
 
     Alert.alert(
       "Live Location Active",
-      `${userName}'s live location is being tracked. Share this link:`,
+      ` Share this link:`,
       [
         {
           text: "Share via WhatsApp",
@@ -370,6 +466,113 @@ Sent via HerShield App`;
     }
   };
 
+  const stopNavigationTracking = async () => {
+    try {
+      const stored = await AsyncStorage.getItem("active_tracking_session");
+      if (stored) {
+        const sessionData = JSON.parse(stored);
+        if (sessionData.session_id) {
+          await fetch(`${BASE_URL}/stop_tracking_session`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sessionData.session_id }),
+          });
+        }
+      }
+    } catch (error) {
+      console.error("Stop navigation tracking:", error);
+    } finally {
+      await AsyncStorage.removeItem("active_tracking_session");
+      await AsyncStorage.setItem("isSharing", "false");
+      setIsNavigationTrackingActive(false);
+      setNavigationTrackingUrl("");
+      toast.showToast("Navigation live tracking stopped", "success");
+    }
+  };
+
+  const generateNavigationShareMessage = (url) => {
+    const userName =
+      user?.fullname || user?.name || user?.email_id?.split("@")[0] || "User";
+    return `${userName} is sharing live location during HerShield route tracking.\n\nTrack live:\n${url}`;
+  };
+
+  const shareNavViaWhatsApp = async (url) => {
+    try {
+      const message = generateNavigationShareMessage(url);
+      const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(message)}`;
+      const canOpen = await Linking.canOpenURL(whatsappUrl);
+      if (canOpen) {
+        await Linking.openURL(whatsappUrl);
+      } else {
+        await Share.share({
+          title: "HerShield live tracking",
+          message,
+          url,
+        });
+      }
+    } catch (error) {
+      console.error("WhatsApp share error:", error);
+      toast.showToast("Sharing failed", "error");
+    }
+  };
+
+  const shareNavViaAnyApp = async (url) => {
+    try {
+      const message = generateNavigationShareMessage(url);
+      await Share.share({
+        title: "HerShield live tracking",
+        message,
+        url,
+      });
+    } catch (error) {
+      console.error("Share error:", error);
+      toast.showToast("Sharing failed", "error");
+    }
+  };
+
+  /** Few buttons so iOS/Android show all; Stop is always reachable from the panel too. */
+  const showNavigationShareSheet = (url) => {
+    Alert.alert("Share tracking link", "Choose how to share.", [
+      { text: "WhatsApp", onPress: () => shareNavViaWhatsApp(url) },
+      { text: "Other apps", onPress: () => shareNavViaAnyApp(url) },
+      {
+        text: "Copy link",
+        onPress: () => {
+          Clipboard.setString(url);
+          toast.showToast("Link copied", "info");
+        },
+      },
+      {
+        text: "Open in browser",
+        onPress: () => {
+          Linking.openURL(url).catch(() => {
+            toast.showToast("Cannot open link", "error");
+          });
+        },
+      },
+      { text: "Back", style: "cancel" },
+    ]);
+  };
+
+  const showNavigationTrackingMenu = (url) => {
+    Alert.alert(
+      "Route live tracking",
+      "Share your link or stop updating your location.",
+      [
+        {
+          text: "Share link",
+          onPress: () => showNavigationShareSheet(url),
+        },
+        {
+          text: "Stop tracking",
+          style: "destructive",
+          onPress: stopNavigationTracking,
+        },
+        { text: "Cancel", style: "cancel" },
+      ]
+    );
+  };
+
   useEffect(() => {
     const checkActiveEmergency = async () => {
       try {
@@ -436,11 +639,14 @@ Sent via HerShield App`;
             title="Emergency SOS"
             subtitle={
               <Text style={styles.subtitle}>
-                {isSharingLiveLocation
-                  ? "🚨 LIVE TRACKING ACTIVE - Real-time location sharing"
-                  : "Tap SOS button to activate.\n You have 5 seconds to cancel if pressed by mistake."
-                }
-              </Text>
+  {[
+    isSharingLiveLocation && "🚨 LIVE TRACKING ACTIVE - Real-time location sharing",
+    isNavigationTrackingActive && "Route live tracking is on. Use Live Tracking below to share the link or stop.",
+    !isSharingLiveLocation && !isNavigationTrackingActive && "Tap SOS button to activate.\nYou have 5 seconds to cancel if pressed by mistake."
+  ]
+    .filter(Boolean)
+    .join("\n")}
+</Text>
             }
           />
 
@@ -468,6 +674,85 @@ Sent via HerShield App`;
               </Text>
             </LinearGradient>
           </TouchableOpacity>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Emergency alert</Text>
+            <Text style={styles.sectionHint}>
+            A loud siren plays continuously until stopped to alert others nearby.
+            </Text>
+            <Animated.View style={{ transform: [{ scale: panicScale }] }}>
+              <TouchableOpacity
+                style={[
+                  styles.panicButton,
+                  isPanicAlarmPlaying && styles.panicButtonActive,
+                ]}
+                activeOpacity={0.92}
+                onPressIn={() => {
+                  Animated.spring(panicScale, {
+                    toValue: 0.96,
+                    useNativeDriver: true,
+                    friction: 6,
+                  }).start();
+                }}
+                onPressOut={() => {
+                  Animated.spring(panicScale, {
+                    toValue: 1,
+                    useNativeDriver: true,
+                    friction: 5,
+                  }).start();
+                }}
+                onPress={togglePanicAlarm}
+              >
+                <Ionicons
+                  name={isPanicAlarmPlaying ? "stop-circle" : "volume-high"}
+                  size={22}
+                  color="#fff"
+                />
+                <Text style={styles.panicText}>
+                  {isPanicAlarmPlaying ? "Stop panic alarm" : "Play panic alarm"}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+          </View>
+
+          {isNavigationTrackingActive && navigationTrackingUrl ? (
+            <View style={styles.navTrackingPanel}>
+              <Text style={styles.navTrackingTitle}>
+                Route live tracking (from Map / Navigation)
+              </Text>
+
+              <TouchableOpacity
+                style={styles.navLinkContainer}
+                onPress={() => {
+                  Clipboard.setString(navigationTrackingUrl);
+                  toast.showToast("Link copied", "info");
+                }}
+              >
+                <Text style={styles.navLinkText} numberOfLines={1}>
+                  {navigationTrackingUrl}
+                </Text>
+                <Text style={styles.navCopyHint}>Tap to copy</Text>
+              </TouchableOpacity>
+
+              <View style={styles.trackingActions}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => showNavigationShareSheet(navigationTrackingUrl)}
+                >
+                  <Ionicons name="share-outline" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Share</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.stopButton]}
+                  onPress={stopNavigationTracking}
+                >
+                  <Ionicons name="stop-circle-outline" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Stop</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
 
           {isSharingLiveLocation && trackingUrl && (
             <View style={styles.trackingPanel}>
@@ -510,10 +795,15 @@ Sent via HerShield App`;
             <ActionButton
               icon="location"
               label="Live Tracking"
-              active={isSharingLiveLocation}
+              active={isNavigationTrackingActive}
               onPress={() => {
-                if (isSharingLiveLocation && trackingUrl) {
-                  showTrackingOptions(trackingUrl);
+                if (isNavigationTrackingActive && navigationTrackingUrl) {
+                  showNavigationTrackingMenu(navigationTrackingUrl);
+                } else {
+                  toast.showToast(
+                    "Start live tracking from Map → route → Navigation",
+                    "info"
+                  );
                 }
               }}
             />
@@ -669,6 +959,43 @@ const styles = StyleSheet.create({
     marginTop: 30,
     marginBottom: 20,
   },
+  navTrackingPanel: {
+    backgroundColor: "#E8F5E9",
+    borderColor: "#2E7D32",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  navTrackingTitle: {
+    color: "#1B5E20",
+    fontWeight: "700",
+    fontSize: 14,
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  navLinkContainer: {
+    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#C8E6C9",
+  },
+  navLinkText: {
+    color: "#2E7D32",
+    fontSize: 12,
+    textAlign: "center",
+  },
+  navCopyHint: {
+    color: "#666",
+    fontSize: 10,
+    marginTop: 4,
+    textAlign: "center",
+    fontStyle: "italic",
+  },
   trackingPanel: {
     backgroundColor: "#FFEBEE",
     borderColor: "#FF0000",
@@ -811,5 +1138,49 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  section: {
+    marginHorizontal: 16,
+    marginTop: 24,
+    marginBottom: 4,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "rgba(139, 19, 62, 0.9)",
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  sectionHint: {
+    fontSize: 13,
+    color: "#666",
+    lineHeight: 18,
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  panicButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "#E53935",
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    elevation: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+  },
+  panicButtonActive: {
+    backgroundColor: "#B71C1C",
+    borderWidth: 2,
+    borderColor: "#FFCDD2",
+  },
+  panicText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 15,
   },
 });

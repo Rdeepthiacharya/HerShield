@@ -70,28 +70,24 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.1,
     shadowRadius: 6,
-    zIndex: 10000, // Very high z-index
+    zIndex: 10000,
   },
-
   innerBar: {
     flexDirection: "row",
     justifyContent: "space-between",
     paddingVertical: 6,
   },
-
   tabButton: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: 6,
   },
-
   activeTab: {
     backgroundColor: "rgba(139, 19, 62, 0.08)",
     borderTopWidth: 3,
     borderTopColor: "#8B133E",
   },
-
   tabLabel: {
     fontSize: 11,
     marginTop: 3,

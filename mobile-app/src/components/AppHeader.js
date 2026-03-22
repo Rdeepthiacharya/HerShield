@@ -49,7 +49,6 @@ export default function AppHeader({
     }
   };
 
-  // Determine what to show on the left side (Logo or custom component)
   const renderLeftSide = () => {
     if (leftComponent) {
       return leftComponent;
@@ -68,16 +67,12 @@ export default function AppHeader({
     return null;
   };
 
-  // Determine what to show on the right side (Back button, Profile/Logout, or custom component)
   const renderRightSide = () => {
     if (rightComponent) {
       return rightComponent;
     }
-    
-    // Create an array of right side buttons
+
     const rightButtons = [];
-    
-    // Add back button if needed
     if (showBack) {
       rightButtons.push(
         <TouchableOpacity 
@@ -89,8 +84,7 @@ export default function AppHeader({
         </TouchableOpacity>
       );
     }
-    
-    // Add profile/logout button if needed
+  
     if (showProfile || showLogout) {
       rightButtons.push(
         <TouchableOpacity 
@@ -106,13 +100,11 @@ export default function AppHeader({
         </TouchableOpacity>
       );
     }
-    
-    // If no buttons, return empty space
+ 
     if (rightButtons.length === 0) {
       return <View style={{ width: 40 }} />;
     }
-    
-    // Return buttons in a row
+
     return (
       <View style={styles.rightButtonsContainer}>
         {rightButtons}
@@ -126,17 +118,14 @@ export default function AppHeader({
 
       <View style={[styles.container, { backgroundColor: bgColor }]}>
 
-        {/* LEFT SIDE: Logo or custom component */}
         <View style={styles.leftContainer}>
           {renderLeftSide()}
         </View>
 
-        {/* CENTER: Title */}
         <Text style={[styles.title, { color: textColor }]} numberOfLines={1}>
           {title}
         </Text>
 
-        {/* RIGHT SIDE: Back button, Profile/Logout, or custom component */}
         <View style={styles.rightContainer}>
           {renderRightSide()}
         </View>
@@ -165,7 +154,7 @@ const styles = StyleSheet.create({
   rightButtonsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12, // Space between buttons
+    gap: 12,
   },
   title: {
     fontSize: 18,

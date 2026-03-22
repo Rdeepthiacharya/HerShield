@@ -6,7 +6,7 @@ export default function YouTubePlayer({ videoId }) {
 
   return (
     <View style={styles.container}>
-      <YoutubeIframe height={220} videoId={videoId} />
+      <YoutubeIframe height={165} videoId={videoId} />
     </View>
   );
 }

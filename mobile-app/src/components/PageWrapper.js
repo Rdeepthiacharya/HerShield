@@ -34,12 +34,10 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
   },
-
   scrollView: {
     flexGrow: 1,
-    paddingBottom: 100, // Space for bottom nav
+    paddingBottom: 100,
   },
-
   innerContainer: {
     flex: 1,
   },

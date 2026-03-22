@@ -1,1562 +1,1565 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
-  Dimensions,
-  Alert,
-  StatusBar,
+  TouchableOpacity,
   Modal,
+  Share,
+  Linking,
+  TextInput,
+  Alert,
   ScrollView,
-  Platform,
-  ActivityIndicator,
-  SafeAreaView
 } from "react-native";
+
+import * as Location from "expo-location";
+import { getDistance } from "geolib";
 import { Ionicons } from "@expo/vector-icons";
-import { WebView } from "react-native-webview";
-import { useToast } from "../context/ToastContext";
+
+import WebMapComponent from "../components/WebMapComponent";
+import MapFloatingControls from "../components/MapFloatingControls";
 import { BASE_URL } from "../utils/config";
-import { GEOAPIFY_KEY } from "../utils/config";
-const { width, height } = Dimensions.get('window');
+import Clipboard from '@react-native-clipboard/clipboard';
+import AppHeader from "../components/AppHeader";
+import { useToast } from "../context/ToastContext";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-
-// Navigation Service
-class NavigationService {
-  constructor(routes, onUpdate) {
-    console.log("NavigationService initialized with routes:", routes?.length || 0);
-
-    this.routes = this.validateAndFormatRoutes(routes || []);
-    this.selectedRouteIndex = 0;
-    this.currentRoute = this.routes?.[0] || null;
-    this.onUpdate = onUpdate;
-    this.isNavigating = false;
-    this.currentPosition = null;
-    this.currentStepIndex = 0;
-    this.routeProgress = 0;
-    this.locationSubscription = null;
+const SpeechModule = (() => {
+  try {
+    return require("expo-speech");
+  } catch {
+    return null;
   }
+})();
 
-  validateAndFormatRoutes(routes) {
-    if (!routes || routes.length === 0) {
-      console.log("No routes provided");
-      return [];
+
+export default function NavigationScreen({ route, navigation }) {
+  const insets = useSafeAreaInsets();
+  const { selectedRoute, end } = route.params;
+  const [remainingTime, setRemainingTime] = useState(null);
+  const [mapReady, setMapReady] = useState(false);
+  const mapRef = useRef(null);
+  const watcher = useRef(null);
+  const toast = useToast();
+  const offRouteCounterRef = useRef(0);
+  const lastCameraUpdateRef = useRef(0);
+  const [liveLocation, setLiveLocation] = useState(null);
+  const [routeDrawn, setRouteDrawn] = useState(false);
+  const [incidentCount, setIncidentCount] = useState(0);
+  const [nearbyReportItems, setNearbyReportItems] = useState([]);
+  const [showReportsPanel, setShowReportsPanel] = useState(true);
+  const lastIncidentFetchRef = useRef(0);
+  const [followUser, setFollowUser] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const navigationStartTimeoutRef = useRef(null);
+  const normalizedRouteRef = useRef([]);
+  const currentStepIndexRef = useRef(0);
+  const lastRerouteAtRef = useRef(0);
+  const lastVoiceStepRef = useRef(-1);
+  const arrivalAnnouncedRef = useRef(false);
+
+  const [shareVisible, setShareVisible] = useState(false);
+  const [selectedDuration, setSelectedDuration] = useState(15);
+  const [trackingUrl, setTrackingUrl] = useState("");
+  const [isSharing, setIsSharing] = useState(false);
+  const [customTime, setCustomTime] = useState("");
+  const [userName, setUserName] = useState("User");
+  const [navigationSteps, setNavigationSteps] = useState([]);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [currentStepDistance, setCurrentStepDistance] = useState(null);
+  const [distanceToDestination, setDistanceToDestination] = useState(null);
+  const [isRerouting, setIsRerouting] = useState(false);
+  const [lastOffRouteDistance, setLastOffRouteDistance] = useState(null);
+
+  const OFF_ROUTE_THRESHOLD_METERS = 35;
+  const REROUTE_COOLDOWN_MS = 8000;
+  const STEP_REACHED_DISTANCE_METERS = 30;
+  const DESTINATION_REACHED_METERS = 20;
+
+  const getLngLatFromPoint = (point) => {
+    if (!point) return null;
+
+    if (Array.isArray(point) && point.length >= 2) {
+      const first = Number(point[0]);
+      const second = Number(point[1]);
+      if (!Number.isFinite(first) || !Number.isFinite(second)) return null;
+
+      // Support both [lat, lng] and [lng, lat]
+      if (Math.abs(first) <= 90 && Math.abs(second) <= 180) {
+        return [second, first];
+      }
+      if (Math.abs(first) <= 180 && Math.abs(second) <= 90) {
+        return [first, second];
+      }
+      return null;
     }
 
-    return routes.map((route, index) => ({
-      ...route,
-      type: route.type || `Route ${index + 1}`,
-      color: route.color || (index === 0 ? '#4CAF50' : '#4A0D35'),
-      distance: route.distance || 0,
-      duration: route.duration || 0,
-      total_risk: route.total_risk || 0,
-      coords: this.formatCoordinates(route.coords || [])
-    }));
-  }
+    if (typeof point === "object") {
+      const lat = Number(point.lat ?? point.latitude);
+      const lng = Number(point.lng ?? point.lon ?? point.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+      return [lng, lat];
+    }
 
-  formatCoordinates(coords) {
-    if (!coords || !Array.isArray(coords)) return [];
+    return null;
+  };
 
-    return coords.map((coord) => {
-      const lat = coord.latitude || coord.lat;
-      const lng = coord.longitude || coord.lng;
+  const toXY = (lng, lat, refLat) => {
+    const scale = Math.cos((refLat * Math.PI) / 180);
+    return { x: lng * scale, y: lat };
+  };
 
-      if (lat === undefined || lng === undefined) return null;
+  const toLngLat = (x, y, refLat) => {
+    const scale = Math.cos((refLat * Math.PI) / 180) || 1;
+    return [x / scale, y];
+  };
 
-      return {
-        latitude: parseFloat(lat),
-        longitude: parseFloat(lng),
-        risk: coord.risk || false
-      };
-    }).filter(coord => coord !== null);
-  }
+  const approxDistanceMeters = (a, b) => {
+    const dLat = (b[1] - a[1]) * 111320;
+    const avgLatRad = (((a[1] + b[1]) / 2) * Math.PI) / 180;
+    const dLng = (b[0] - a[0]) * 111320 * Math.cos(avgLatRad);
+    return Math.sqrt(dLat * dLat + dLng * dLng);
+  };
 
-  async startNavigation() {
-    if (this.isNavigating) return;
+  const bearingDegrees = (from, to) => {
+    if (!from || !to) return 0;
+    const [lng1, lat1] = from;
+    const [lng2, lat2] = to;
+    const phi1 = (lat1 * Math.PI) / 180;
+    const phi2 = (lat2 * Math.PI) / 180;
+    const lambda = ((lng2 - lng1) * Math.PI) / 180;
+    const y = Math.sin(lambda) * Math.cos(phi2);
+    const x =
+      Math.cos(phi1) * Math.sin(phi2) -
+      Math.sin(phi1) * Math.cos(phi2) * Math.cos(lambda);
+    const theta = (Math.atan2(y, x) * 180) / Math.PI;
+    return (theta + 360) % 360;
+  };
 
+  const deltaAngleSigned = (next, prev) => {
+    let d = next - prev;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    return d;
+  };
+
+  const getTurnInstruction = (turnDelta) => {
+    const absDelta = Math.abs(turnDelta);
+    if (absDelta < 20) return "Continue straight";
+    if (absDelta < 45) return turnDelta > 0 ? "Slight right" : "Slight left";
+    if (absDelta < 120) return turnDelta > 0 ? "Turn right" : "Turn left";
+    return turnDelta > 0 ? "Make a U-turn" : "Make a U-turn";
+  };
+
+  const buildTurnByTurnFromGeometry = (routeCoords = []) => {
+    if (!Array.isArray(routeCoords) || routeCoords.length < 3) return [];
+    const steps = [];
+    for (let i = 1; i < routeCoords.length - 1; i += 1) {
+      const prev = routeCoords[i - 1];
+      const cur = routeCoords[i];
+      const next = routeCoords[i + 1];
+      if (!prev || !cur || !next) continue;
+      const b1 = bearingDegrees(prev, cur);
+      const b2 = bearingDegrees(cur, next);
+      const delta = deltaAngleSigned(b2, b1);
+      const instruction = getTurnInstruction(delta);
+      const shouldAdd =
+        instruction !== "Continue straight" || i % 8 === 0;
+      if (!shouldAdd) continue;
+      steps.push({
+        instruction,
+        point: cur,
+        distanceMeters: Math.round(approxDistanceMeters(prev, cur)),
+      });
+    }
+
+    steps.push({
+      instruction: "You are arriving at your destination",
+      point: routeCoords[routeCoords.length - 1],
+      distanceMeters: 0,
+    });
+    return steps;
+  };
+
+  const normalizeStep = (step, index) => {
+    const instruction =
+      step?.instruction ||
+      step?.text ||
+      step?.description ||
+      step?.maneuver?.instruction ||
+      step?.name ||
+      `Continue to step ${index + 1}`;
+
+    const pointCandidate =
+      step?.point ||
+      step?.location ||
+      step?.end_location ||
+      step?.to ||
+      step?.position ||
+      step?.latlng ||
+      step?.coordinates;
+
+    const lngLat = getLngLatFromPoint(pointCandidate);
+    const distanceMeters = Number(
+      step?.distance_m ??
+      step?.distance ??
+      step?.distanceMeters ??
+      step?.length_m ??
+      0
+    );
+
+    return {
+      instruction,
+      point: lngLat,
+      distanceMeters: Number.isFinite(distanceMeters) ? distanceMeters : 0,
+    };
+  };
+
+  const extractSteps = (routeObj, routeCoords = []) => {
+    const fromRoute =
+      routeObj?.steps ||
+      routeObj?.instructions ||
+      routeObj?.maneuvers ||
+      routeObj?.navigation?.steps ||
+      routeObj?.legs?.[0]?.steps ||
+      [];
+
+    const normalizedFromRoute = Array.isArray(fromRoute)
+      ? fromRoute.map(normalizeStep).filter((s) => !!s.point || !!s.instruction)
+      : [];
+
+    if (normalizedFromRoute.length > 0) {
+      const mapped = normalizedFromRoute.map((step, idx) => ({
+        ...step,
+        point: step.point || routeCoords[Math.min(idx + 1, routeCoords.length - 1)] || null,
+      }));
+
+      const hasTurnWords = mapped.some((step) =>
+        /\b(left|right|u-?turn|arriv|destination|roundabout)\b/i.test(
+          step?.instruction || ""
+        )
+      );
+      if (hasTurnWords) return mapped;
+
+      // If backend steps are too generic, synthesize turn-by-turn from geometry.
+      const geometrySteps = buildTurnByTurnFromGeometry(routeCoords);
+      return geometrySteps.length ? geometrySteps : mapped;
+    }
+
+    // Fallback: create synthetic guidance steps from route geometry.
+    if (!routeCoords.length) return [];
+    const synthetic = buildTurnByTurnFromGeometry(routeCoords);
+    return synthetic;
+  };
+
+  const speakText = (text) => {
+    if (!text) return;
     try {
-      const { requestForegroundPermissionsAsync, getCurrentPositionAsync, watchPositionAsync } = await import('expo-location');
+      if (SpeechModule?.stop) {
+        SpeechModule.stop();
+      }
+      if (SpeechModule?.speak) {
+        SpeechModule.speak(text, { rate: 0.95, pitch: 1.0 });
+      }
+    } catch (e) {
+      console.log("Voice speak error", e);
+    }
+  };
 
-      const { status } = await requestForegroundPermissionsAsync();
+  const getDestinationLngLat = () => getLngLatFromPoint(end);
 
-      if (status !== 'granted') {
-        this.onUpdate?.({
-          type: 'gps_error',
-          error: 'Location permission not granted'
-        });
+  const formatInstructionWithDistance = (instruction, distanceMeters) => {
+    const base = (instruction || "Follow the highlighted route").trim();
+    if (distanceMeters == null || !Number.isFinite(distanceMeters)) return base;
+    const meters = Math.max(0, Math.round(distanceMeters));
+    if (meters <= 20) return `${base} now`;
+    const distanceLabel =
+      meters >= 1000
+        ? `${(meters / 1000).toFixed(meters >= 10000 ? 0 : 1)} km`
+        : `${meters} m`;
+    return `After ${distanceLabel}, ${base.charAt(0).toLowerCase()}${base.slice(1)}`;
+  };
+
+  const updateNavigationStepState = (userLngLat, speed = 0) => {
+    if (!isNavigating || !navigationSteps.length || !userLngLat) return;
+
+    const destination = getDestinationLngLat();
+
+    // ✅ Destination detection (adaptive)
+    if (destination) {
+      const distToDest = approxDistanceMeters(userLngLat, destination);
+      setDistanceToDestination(Math.round(distToDest));
+
+      if (distToDest <= Math.max(20, speed * 2)) {
+        if (!arrivalAnnouncedRef.current) {
+          arrivalAnnouncedRef.current = true;
+          setIsNavigating(false);
+          setFollowUser(false);
+          speakText("You have reached your destination. Stay safe!");
+          toast.showToast("You have reached your destination. Stay safe!", "success");
+        }
         return;
       }
-
-      const initialLocation = await getCurrentPositionAsync({ accuracy: 6 });
-
-      this.currentPosition = {
-        latitude: initialLocation.coords.latitude,
-        longitude: initialLocation.coords.longitude,
-        accuracy: initialLocation.coords.accuracy,
-        speed: initialLocation.coords.speed || 0,
-        timestamp: new Date().toISOString()
-      };
-
-      this.isNavigating = true;
-      this.watchPosition();
-      this.updateNavigation();
-
-    } catch (error) {
-      this.onUpdate?.({
-        type: 'gps_error',
-        error: error.message
-      });
     }
-  }
 
-  async watchPosition() {
-    try {
-      const { watchPositionAsync } = await import('expo-location');
+    let idx = currentStepIndexRef.current;
 
-      if (this.locationSubscription) {
-        this.locationSubscription.remove();
-      }
+    // ✅ Look-ahead logic (2 steps ahead)
+    for (let i = idx; i < Math.min(idx + 2, navigationSteps.length); i++) {
+      const step = navigationSteps[i];
+      if (!step?.point) continue;
 
-      this.locationSubscription = await watchPositionAsync(
-        {
-          accuracy: 6,
-          distanceInterval: 5,
-          timeInterval: 1000,
-        },
-        (position) => {
-          this.currentPosition = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            speed: position.coords.speed || 0,
-            timestamp: new Date().toISOString()
-          };
-          this.updateNavigation();
-        }
+      const d = approxDistanceMeters(userLngLat, step.point);
+
+      const dynamicThreshold = Math.max(
+        15,
+        Math.min(40, step.distanceMeters * 0.2 || 25)
       );
 
-    } catch (error) {
-      this.onUpdate?.({
-        type: 'gps_error',
-        error: 'Failed to watch position: ' + error.message
-      });
-    }
-  }
-
-  calculateHaversineDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371000;
-    const φ1 = this.toRad(lat1);
-    const φ2 = this.toRad(lat2);
-    const Δφ = this.toRad(lat2 - lat1);
-    const Δλ = this.toRad(lon2 - lon1);
-
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) *
-      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-  }
-
-  updateNavigation() {
-    if (!this.currentPosition || !this.currentRoute?.coords || this.currentRoute.coords.length === 0) {
-      this.onUpdate?.({
-        type: 'route_error',
-        error: 'No route coordinates available'
-      });
-      return;
-    }
-
-    const routeCoords = this.currentRoute.coords;
-
-    let nearestIndex = 0;
-    let minDistance = Infinity;
-
-    for (let i = 0; i < routeCoords.length; i++) {
-      const coord = routeCoords[i];
-      const distance = this.calculateHaversineDistance(
-        this.currentPosition.latitude,
-        this.currentPosition.longitude,
-        coord.latitude,
-        coord.longitude
-      );
-
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestIndex = i;
-      }
-    }
-
-    this.currentStepIndex = nearestIndex;
-    const isOffRoute = minDistance > 50;
-    const progress = routeCoords.length > 1 ?
-      Math.min(100, Math.max(0, (nearestIndex / (routeCoords.length - 1)) * 100)) : 0;
-    this.routeProgress = progress;
-
-    const steps = this.calculateSteps(routeCoords);
-    let currentStep = null;
-    let nextStep = null;
-
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      if (nearestIndex >= step.startIndex) {
-        currentStep = step;
-        nextStep = steps[i + 1];
+      if (d <= dynamicThreshold) {
+        idx = i + 1;
       } else {
+        setCurrentStepDistance(Math.round(d));
+
+        // Speak before turn
+        if (d < 60 && lastVoiceStepRef.current !== i) {
+          lastVoiceStepRef.current = i;
+          speakText(formatInstructionWithDistance(step.instruction, d));
+        }
         break;
       }
     }
 
-    if (!currentStep && steps.length > 0) {
-      currentStep = steps[0];
-      nextStep = steps[1];
-    }
+    const nextIndex = Math.min(idx, navigationSteps.length - 1);
 
-    let distanceToNext = 0;
-    if (nextStep && currentStep && routeCoords[nearestIndex]) {
-      const nextStepCoord = routeCoords[nextStep.startIndex];
-      distanceToNext = this.calculateHaversineDistance(
-        this.currentPosition.latitude,
-        this.currentPosition.longitude,
-        nextStepCoord.latitude,
-        nextStepCoord.longitude
+    if (nextIndex !== currentStepIndexRef.current) {
+      currentStepIndexRef.current = nextIndex;
+      setCurrentStepIndex(nextIndex);
+
+      const stepText = navigationSteps[nextIndex]?.instruction;
+
+      if (stepText && lastVoiceStepRef.current !== nextIndex) {
+        lastVoiceStepRef.current = nextIndex;
+        speakText(stepText);
+      }
+    }
+  };
+
+  const updateNavCamera = (displayLat, displayLng, routeCoords, heading, speed) => {
+    if (!followUser || !isNavigating) return;
+
+    const now = Date.now();
+    if (now - lastCameraUpdateRef.current < 400) return;
+    lastCameraUpdateRef.current = now;
+
+    const userLngLat = [displayLng, displayLat];
+    const nearest = getNearestPointOnRoute(userLngLat, routeCoords);
+
+    let target = userLngLat;
+
+    let nearestIndex = -1;
+    if (nearest?.point) {
+      nearestIndex = routeCoords.findIndex(
+        (p) => approxDistanceMeters(p, nearest.point) < 5
       );
-    }
-
-    const updateData = {
-      type: isOffRoute ? 'off_route' : 'step_updated',
-      currentStep: currentStep,
-      nextStep: nextStep,
-      progress: progress,
-      distanceToNext: distanceToNext,
-      isOffRoute: isOffRoute,
-      currentPosition: this.currentPosition,
-      routeInfo: {
-        distance: this.currentRoute.distance,
-        duration: this.currentRoute.duration,
-        totalRisk: this.currentRoute.total_risk,
-        type: this.currentRoute.type
-      }
-    };
-
-    this.onUpdate?.(updateData);
-
-    if (nearestIndex >= routeCoords.length - 1 && progress >= 99) {
-      this.onUpdate?.({
-        type: 'destination_reached',
-        currentStep: {
-          type: 'destination',
-          text: 'You have reached your destination'
-        }
-      });
-    }
-  }
-
-  calculateSteps(coords) {
-    if (!coords || coords.length < 2) return [];
-
-    return [
-      {
-        type: 'start',
-        text: 'Start navigation',
-        coordinate: coords[0],
-        startIndex: 0,
-        endIndex: 0
-      },
-      {
-        type: 'destination',
-        text: 'Arrive at destination',
-        coordinate: coords[coords.length - 1],
-        startIndex: coords.length - 1,
-        endIndex: coords.length - 1
-      }
-    ];
-  }
-
-  toRad(degrees) {
-    return degrees * Math.PI / 180;
-  }
-
-  switchRoute(routeIndex) {
-    if (routeIndex >= 0 && routeIndex < this.routes.length) {
-      this.selectedRouteIndex = routeIndex;
-      this.currentRoute = this.routes[routeIndex];
-      this.currentStepIndex = 0;
-      this.routeProgress = 0;
-
-      this.onUpdate?.({
-        type: 'route_changed',
-        route: this.currentRoute,
-        selectedIndex: routeIndex
-      });
-
-      this.updateNavigation();
-      return true;
-    }
-    return false;
-  }
-
-  getCurrentRoute() {
-    return this.currentRoute;
-  }
-
-  getAllRoutes() {
-    return this.routes;
-  }
-
-  stopNavigation() {
-    if (this.locationSubscription) {
-      this.locationSubscription.remove();
-      this.locationSubscription = null;
-    }
-    this.isNavigating = false;
-    this.currentPosition = null;
-  }
-
-  pauseNavigation() {
-    if (this.locationSubscription) {
-      this.locationSubscription.remove();
-      this.locationSubscription = null;
-    }
-    this.isNavigating = false;
-  }
-
-  resumeNavigation() {
-    if (!this.isNavigating) {
-      this.isNavigating = true;
-      this.watchPosition();
-    }
-  }
-}
-
-export default function NavigationScreen({ navigation, route }) {
-  const { routes: routeData, start, end, locationName } = route.params || {};
-  const webRef = useRef(null);
-  const [navigationService, setNavigationService] = useState(null);
-  const { showToast } = useToast();
-  const [currentStep, setCurrentStep] = useState(null);
-  const [nextStep, setNextStep] = useState(null);
-  const [progress, setProgress] = useState(0);
-  const [distanceToNext, setDistanceToNext] = useState(0);
-  const [isPaused, setIsPaused] = useState(false);
-  const [showRouteOptions, setShowRouteOptions] = useState(false);
-  const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
-  const [currentPosition, setCurrentPosition] = useState(null);
-  const [mapReady, setMapReady] = useState(false);
-  const [recalculating, setRecalculating] = useState(false);
-  const [allRoutes, setAllRoutes] = useState([]);
-
-  useEffect(() => {
-    if (routeData && routeData.length > 0) {
-      setAllRoutes(routeData);
-    } else {
-      showToast("No route data was provided. Please go back and try again", "error");
-      setTimeout(() => navigation.goBack(), 2000);
-    }
-  }, [routeData]);
-
-  useEffect(() => {
-    if (allRoutes.length > 0) {
-      initializeNavigation();
-    }
-  }, [allRoutes]);
-
-  useEffect(() => {
-    return () => {
-      if (navigationService) {
-        navigationService.stopNavigation();
-      }
-    };
-  }, [navigationService]);
-
-  useEffect(() => {
-    if (mapReady && navigationService) {
-      updateMapRoute();
-    }
-  }, [mapReady, navigationService]);
-
-  const initializeNavigation = () => {
-    const navService = new NavigationService(
-      allRoutes,
-      (navUpdate) => {
-        if (navUpdate.type === 'step_updated' || navUpdate.type === 'route_changed') {
-          setCurrentStep(navUpdate.currentStep);
-          setNextStep(navUpdate.nextStep);
-          setProgress(navUpdate.progress);
-          setDistanceToNext(navUpdate.distanceToNext || 0);
-          if (navUpdate.currentPosition) {
-            setCurrentPosition(navUpdate.currentPosition);
+      if (nearestIndex < 0) {
+        let bestIdx = 0;
+        let bestDist = Number.POSITIVE_INFINITY;
+        routeCoords.forEach((p, idx) => {
+          const d = approxDistanceMeters(p, nearest.point);
+          if (d < bestDist) {
+            bestDist = d;
+            bestIdx = idx;
           }
-
-          if (webRef.current && mapReady) {
-            updateMapRoute();
-          }
-        }
-
-        if (navUpdate.type === 'off_route') {
-          showToast("You have strayed from the route", "warning");
-          Alert.alert(
-            "Off Route",
-            `You have strayed from the route.`,
-            [
-              { text: "Recalculate", onPress: () => recalculateRoute() },
-              { text: "Continue Anyway", style: "cancel" }
-            ]
-          );
-        }
-
-        if (navUpdate.type === 'destination_reached') {
-          showToast("You have safely reached your destination!", "success");
-          Alert.alert(
-            "Arrived at Destination",
-            "You have safely reached your destination!",
-            [{ text: "OK", onPress: () => navigation.goBack() }]
-          );
-        }
-
-        if (navUpdate.type === 'gps_error') {
-          showToast(navUpdate.error || "Unable to get your location", "error");
-          Alert.alert(
-            "GPS Error",
-            navUpdate.error || "Unable to get your location",
-            [{ text: "OK" }]
-          );
-        }
+        });
+        nearestIndex = bestIdx;
       }
-    );
 
-    setNavigationService(navService);
-    navService.startNavigation();
-  };
+      const aheadPoint =
+        routeCoords[Math.min(nearestIndex + 8, routeCoords.length - 1)];
 
-  const updateMapRoute = () => {
-    if (!navigationService || !navigationService.getCurrentRoute()) return;
-
-    const route = navigationService.getCurrentRoute();
-
-    if (!route.coords || route.coords.length === 0) return;
-
-    const allAvailableRoutes = navigationService.getAllRoutes();
-
-    const routePoints = route.coords.map(coord => ({
-      lat: coord.latitude,
-      lng: coord.longitude
-    }));
-
-    const alternativeRoutes = allAvailableRoutes
-      .filter((r, index) => index !== navigationService.selectedRouteIndex)
-      .slice(0, 2)
-      .map(r => ({
-        coords: (r.coords || []).map(c => ({
-          lat: c.latitude,
-          lng: c.longitude
-        })),
-        distance: r.distance,
-        duration: r.duration,
-        total_risk: r.total_risk,
-        type: r.type || `Route ${allAvailableRoutes.indexOf(r) + 1}`,
-        color: r.color || '#FFC107'
-      }));
-
-    const message = {
-      type: "updateRoute",
-      route: routePoints,
-      currentPosition: currentPosition ? {
-        lat: currentPosition.latitude,
-        lng: currentPosition.longitude
-      } : null,
-      showAlternativeRoutes: alternativeRoutes.length > 0,
-      alternativeRoutes: alternativeRoutes,
-      selectedRouteIndex: navigationService.selectedRouteIndex,
-      routeColor: route.color || '#007BFF'
-    };
-
-    if (webRef.current) {
-      webRef.current.postMessage(JSON.stringify(message));
+      target = aheadPoint || nearest.point;
     }
+
+    // Dynamic zoom
+    let zoom = 18;
+    if (speed > 10) zoom = 17;
+    if (speed > 20) zoom = 16;
+
+    const routeBearing =
+      nearestIndex >= 0 && routeCoords[nearestIndex + 1]
+        ? bearingDegrees(routeCoords[nearestIndex], routeCoords[nearestIndex + 1])
+        : null;
+    const cameraBearing = Number.isFinite(heading) ? heading : routeBearing || 0;
+
+    mapRef.current?.animateCamera?.({
+      center: [target[0], target[1]],
+      zoom,
+      bearing: cameraBearing,
+      duration: 400,
+    });
   };
 
-  const switchRoute = (index) => {
-    if (navigationService) {
-      const success = navigationService.switchRoute(index);
-      if (success) {
-        setSelectedRouteIndex(index);
-        setShowRouteOptions(false);
+  const rerouteFromCurrentLocation = async (coords) => {
+    const now = Date.now();
+    if (isRerouting || now - lastRerouteAtRef.current < REROUTE_COOLDOWN_MS) return;
 
-        if (webRef.current && mapReady) {
-          updateMapRoute();
-        }
-      }
-    }
-  };
-
-  const recalculateRoute = async () => {
-    setRecalculating(true);
-    await fetchNewRoutes();
-  };
-
-  const fetchNewRoutes = async () => {
     try {
-      setRecalculating(true);
+      setIsRerouting(true);
+      lastRerouteAtRef.current = now;
+      speakText("Off route detected. Rerouting.");
+      toast.showToast("Off-route detected. Rerouting...", "warning");
 
-      if (!start || !end) {
-        showToast("Start and end points are required", "error");
+      const res = await fetch(`${BASE_URL}/safe_route`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start: { lat: coords.latitude, lng: coords.longitude },
+          end: { lat: end.lat, lng: end.lng },
+          mode: "walk",
+          multiple: false,
+        }),
+      });
+      const data = await res.json();
+      const nextRoute = data?.route || data?.routes?.[0];
+      if (!res.ok || !data?.success || !nextRoute) {
+        toast.showToast("Reroute failed. Continuing current route.", "error");
         return;
       }
 
-      const response = await fetch(`${BASE_URL}/safe_route`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          start: start,
-          end: end
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success && data.routes && data.routes.length > 0) {
-        const newRoutes = data.routes;
-        setAllRoutes(newRoutes);
-
-        if (navigationService) {
-          navigationService.stopNavigation();
-        }
-
-        setSelectedRouteIndex(0);
-        setProgress(0);
-        setCurrentStep(null);
-        setNextStep(null);
-        setDistanceToNext(0);
-
-        if (webRef.current && mapReady) {
-          webRef.current.postMessage(JSON.stringify({ type: "clearRoutes" }));
-        }
-
-        setShowRouteOptions(true);
-        showToast(`${newRoutes.length} route options available`, "success");
-      } else {
-        showToast("Could not find alternative routes", "error");
+      const convertedCoords = (nextRoute?.coords || [])
+        .map(getLngLatFromPoint)
+        .filter(Boolean);
+      if (convertedCoords.length < 2) {
+        toast.showToast("Reroute unavailable.", "error");
+        return;
       }
-    } catch (error) {
-      console.error("Recalculation error:", error);
-      showToast("Failed to recalculate routes", "error");
+
+      normalizedRouteRef.current = convertedCoords;
+      mapRef.current?.showRoutes([{ coords: convertedCoords, color: "#1E88E5" }]);
+      mapRef.current?.highlightRoute(0);
+      mapRef.current?.fitRoute(convertedCoords);
+
+      const freshSteps = extractSteps(nextRoute, convertedCoords);
+      setNavigationSteps(freshSteps);
+      currentStepIndexRef.current = 0;
+      setCurrentStepIndex(0);
+      setCurrentStepDistance(null);
+      lastVoiceStepRef.current = -1;
+      if (freshSteps[0]?.instruction) {
+        speakText(freshSteps[0].instruction);
+      }
+    } catch (e) {
+      console.log("Reroute error:", e);
     } finally {
-      setRecalculating(false);
+      setIsRerouting(false);
     }
   };
 
-  const togglePause = () => {
-    setIsPaused(!isPaused);
-    if (navigationService) {
-      if (isPaused) {
-        navigationService.resumeNavigation();
-      } else {
-        navigationService.pauseNavigation();
+  const getNearestPointOnRoute = (userLngLat, routeCoords) => {
+    if (!userLngLat || !routeCoords?.length) return null;
+    if (routeCoords.length === 1) return routeCoords[0];
+
+    let bestPoint = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (let i = 0; i < routeCoords.length - 1; i += 1) {
+      const a = routeCoords[i];
+      const b = routeCoords[i + 1];
+      if (!a || !b) continue;
+
+      const refLat = (a[1] + b[1] + userLngLat[1]) / 3;
+      const pa = toXY(a[0], a[1], refLat);
+      const pb = toXY(b[0], b[1], refLat);
+      const pp = toXY(userLngLat[0], userLngLat[1], refLat);
+
+      const abx = pb.x - pa.x;
+      const aby = pb.y - pa.y;
+      const abLenSq = abx * abx + aby * aby;
+      if (abLenSq === 0) continue;
+
+      let t = ((pp.x - pa.x) * abx + (pp.y - pa.y) * aby) / abLenSq;
+      t = Math.max(0, Math.min(1, t));
+
+      const projX = pa.x + t * abx;
+      const projY = pa.y + t * aby;
+      const projLngLat = toLngLat(projX, projY, refLat);
+      const dist = approxDistanceMeters(userLngLat, projLngLat);
+
+      if (dist < bestDistance) {
+        bestDistance = dist;
+        bestPoint = projLngLat;
       }
     }
+
+    return bestPoint ? { point: bestPoint, distance: bestDistance } : null;
   };
 
-  const stopNavigation = () => {
-    if (navigationService) {
-      navigationService.stopNavigation();
-    }
-    navigation.goBack();
+  /* ================= FORMAT ================= */
+  const formatTime = (min) => {
+    if (!min) return "0 min";
+    if (min < 60) return `${min} min`;
+    return `${Math.floor(min / 60)}h ${min % 60}m`;
+  };
+  const formatDurationNice = (minutes) => {
+    if (!minutes || minutes <= 0) return "0 min";
+
+    const hrs = Math.floor(minutes / 60);
+    const mins = Math.round(minutes % 60);
+
+    if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m`;
+    if (hrs > 0) return `${hrs}h`;
+    return `${mins} min`;
   };
 
-  const getDistanceText = (meters) => {
-    if (!meters || meters < 1) return "0 m";
-    if (meters < 1000) {
-      return `${Math.round(meters)} m`;
-    }
-    return `${(meters / 1000).toFixed(1)} km`;
-  };
-
-  const getTurnIcon = (type) => {
-    switch (type) {
-      case 'start': return 'play';
-      case 'left': return 'arrow-back';
-      case 'right': return 'arrow-forward';
-      case 'slight-left': return 'return-up-left';
-      case 'slight-right': return 'return-up-right';
-      case 'uturn': return 'sync';
-      case 'destination': return 'flag';
-      case 'straight': return 'arrow-forward';
-      default: return 'arrow-forward';
-    }
-  };
-
-  const getRiskColor = (riskScore) => {
-    if (riskScore === 0) return '#4CAF50';
-    if (riskScore <= 2) return '#FFC107';
-    return '#F44336';
-  };
-
-  const getRiskText = (riskScore) => {
-    if (riskScore === 0) return 'Safest';
-    if (riskScore <= 2) return 'Moderate';
-    return 'Risky';
-  };
-
-  const RouteOptionItem = ({ route, index, isSelected, onSelect }) => (
-    <TouchableOpacity
-      style={[
-        styles.routeOption,
-        isSelected && styles.selectedRouteOption
-      ]}
-      onPress={() => onSelect(index)}
-      activeOpacity={0.7}
-    >
-      <View style={[
-        styles.routeIconContainer,
-        { borderColor: isSelected ? route.color || '#4CAF50' : '#e0e0e0' }
-      ]}>
-        <View style={[
-          styles.routeIcon,
-          { backgroundColor: route.color || '#4CAF50' }
-        ]} />
-      </View>
-
-      <View style={styles.routeDetails}>
-        <View style={styles.routeHeader}>
-          <View style={styles.routeTitleContainer}>
-            <Text style={styles.routeType} numberOfLines={1}>
-              {route.type || `Route ${index + 1}`}
-            </Text>
-            {isSelected && (
-              <View style={styles.selectedIndicator}>
-                <Text style={styles.selectedText}>Selected</Text>
-              </View>
-            )}
-          </View>
-          <View style={[
-            styles.riskBadgeSmall,
-            { backgroundColor: getRiskColor(route.total_risk || 0) }
-          ]}>
-            <Text style={styles.riskTextSmall}>
-              {getRiskText(route.total_risk || 0)}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.routeStatsRow}>
-          <View style={styles.statItem}>
-            <Ionicons name="walk-outline" size={16} color="#666" />
-            <Text style={styles.statText}>{route.distance || 0} km</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Ionicons name="time-outline" size={16} color="#666" />
-            <Text style={styles.statText}>{route.duration || 0} min</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Ionicons name="warning-outline" size={16} color="#666" />
-            <Text style={styles.statText}>{route.total_risk || 0} risks</Text>
-          </View>
-        </View>
-      </View>
-
-      {isSelected && (
-        <Ionicons name="checkmark-circle" size={24} color="#4A0D35" />
-      )}
-    </TouchableOpacity>
-  );
-
-  const htmlContent = `<!DOCTYPE html>
-<html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Navigation Map</title>
-<link href="https://unpkg.com/maplibre-gl@3.4.0/dist/maplibre-gl.css" rel="stylesheet" />
-<script src="https://unpkg.com/maplibre-gl@3.4.0/dist/maplibre-gl.js"></script>
-<style>
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
-  #map { width: 100vw; height: 100vh; }
-  .user-marker {
-    width: 20px;
-    height: 20px;
-    background-color: #4A0D35;
-    border-radius: 50%;
-    border: 3px solid white;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-  }
-</style>
-</head>
-<body>
-<div id="map"></div>
-<script>
-  const API_KEY = "${GEOAPIFY_KEY}";
-  let map = null;
-  let userMarker = null;
-  let routeLayers = {};
-  
-  function initMap() {
-    map = new maplibre.Map({
-      container: "map",
-      style: "https://maps.geoapify.com/v1/styles/osm-bright/style.json?apiKey=" + API_KEY,
-      center: [77.5946, 12.9716],
-      zoom: 13,
-      attributionControl: false
-    });
-    
-    map.on('load', function() {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ 
-        type: "mapReady",
-        message: "Map is ready"
-      }));
-    });
-    
-    map.addControl(new maplibre.NavigationControl());
-  }
-  
-  function drawRoute(routePoints, color = '#007BFF', width = 6, routeId = 'main') {
-    if (!map || !routePoints || routePoints.length < 2) return;
-    
-    if (routeLayers[routeId]) {
-      if (map.getLayer(routeId)) map.removeLayer(routeId);
-      if (map.getSource(routeId)) map.removeSource(routeId);
-    }
-    
-    const coordinates = routePoints.map(p => [p.lng, p.lat]);
-    
-    const routeFeature = {
-      type: 'Feature',
-      properties: { color: color },
-      geometry: {
-        type: 'LineString',
-        coordinates: coordinates
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const data = await AsyncStorage.getItem("user");
+        if (data) {
+          const parsed = JSON.parse(data);
+          setUserName(parsed.fullname || parsed.name || "User");
+        }
+      } catch (e) {
+        console.log("User load error", e);
       }
     };
-    
-    map.addSource(routeId, {
-      type: 'geojson',
-      data: routeFeature
-    });
-    
-    map.addLayer({
-      id: routeId,
-      type: 'line',
-      source: routeId,
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round'
-      },
-      paint: {
-        'line-color': color,
-        'line-width': width,
-        'line-opacity': routeId === 'main' ? 0.8 : 0.4
+
+    loadUser();
+  }, []);
+
+  useEffect(() => {
+    if (!isSharing) return;
+
+    const interval = setInterval(async () => {
+      const stored = await AsyncStorage.getItem("active_tracking_session");
+      if (!stored) return;
+
+      const session = JSON.parse(stored);
+
+      if (!session.expires_at) return; // unlimited case
+
+      const now = Date.now();
+      const expiry = new Date(session.expires_at).getTime();
+
+      if (now >= expiry) {
+        stopSharing();
       }
-    });
-    
-    routeLayers[routeId] = { source: routeId, color: color };
-    
-    fitMapToRoute(coordinates);
-  }
-  
-  function fitMapToRoute(coordinates) {
-    if (!map || coordinates.length < 2) return;
-    
-    const bounds = coordinates.reduce((bounds, coord) => {
-      return bounds.extend(coord);
-    }, new maplibre.LngLatBounds(coordinates[0], coordinates[0]));
-    
-    map.fitBounds(bounds, {
-      padding: 50,
-      duration: 1000,
-      maxZoom: 16
-    });
-  }
-  
-  function updateUserPosition(position) {
-    if (!map || !position) return;
-    
-    const coords = [position.lng, position.lat];
-    
-    if (!userMarker) {
-      const el = document.createElement('div');
-      el.className = 'user-marker';
-      
-      userMarker = new maplibre.Marker({
-        element: el,
-        anchor: 'center'
-      })
-      .setLngLat(coords)
-      .addTo(map);
-    } else {
-      userMarker.setLngLat(coords);
-    }
-    
-    map.easeTo({
-      center: coords,
-      zoom: 16,
-      duration: 1000
-    });
-  }
-  
-  function clearAllRoutes() {
-    Object.keys(routeLayers).forEach(routeId => {
-      if (map.getLayer(routeId)) map.removeLayer(routeId);
-      if (map.getSource(routeId)) map.removeSource(routeId);
-    });
-    routeLayers = {};
-  }
-  
-  window.addEventListener("message", function(event) {
+    }, 5000); // check every 5 sec
+
+    return () => clearInterval(interval);
+  }, [isSharing]);
+
+  useEffect(() => {
+    if (!isSharing) return;
+
+    const interval = setInterval(async () => {
+      const stored = await AsyncStorage.getItem("active_tracking_session");
+      if (!stored) return;
+
+      const session = JSON.parse(stored);
+
+      if (!session.expires_at) {
+        setRemainingTime("Until you stop");
+        return;
+      }
+
+      const now = Date.now();
+      const expiry = new Date(session.expires_at).getTime();
+      const diff = expiry - now;
+
+      if (diff <= 0) {
+        setRemainingTime("Ending...");
+        return;
+      }
+
+      const mins = Math.floor(diff / 60000);
+      const hrs = Math.floor(mins / 60);
+      const remMin = mins % 60;
+
+      if (hrs > 0) {
+        setRemainingTime(`${hrs}h ${remMin}m left`);
+      } else {
+        setRemainingTime(`${mins} min left`);
+      }
+
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isSharing]);
+
+  /* ================= DRAW ROUTE (SAFE) ================= */
+  const drawRouteOnce = () => {
+    if (!selectedRoute?.coords?.length) return;
+
     try {
-      const msg = JSON.parse(event.data);
-      
-      if (msg.type === "updateRoute") {
-        if (msg.route && msg.route.length > 0) {
-          drawRoute(
-            msg.route, 
-            msg.routeColor || '#007BFF', 
-            6, 
-            'main'
-          );
-        }
-        
-        if (msg.currentPosition) {
-          updateUserPosition(msg.currentPosition);
-        }
+      const convertedCoords = selectedRoute.coords
+        .map(getLngLatFromPoint)
+        .filter(Boolean);
+      if (convertedCoords.length < 2) return;
+
+      const routeObj = {
+        coords: convertedCoords,
+        color: "#4CAF50",
+      };
+      normalizedRouteRef.current = convertedCoords;
+
+      console.log("✅ FINAL ROUTE:", routeObj.coords);
+
+      mapRef.current?.showRoutes([routeObj]);
+      mapRef.current?.highlightRoute(0);
+
+      const endPoint = convertedCoords[convertedCoords.length - 1];
+      if (endPoint) {
+        mapRef.current?.setEnd(endPoint[1], endPoint[0]);
       }
-      
-      if (msg.type === "clearRoutes") {
-        clearAllRoutes();
-      }
-      
-    } catch (err) {
-      console.error('Message parse error:', err);
+
+      mapRef.current?.fitRoute?.(routeObj.coords);
+
+      setRouteDrawn(true);
+
+    } catch (e) {
+      console.log("❌ Route draw error:", e);
     }
-  });
+  };
+
+  const copyLink = async () => {
+    Clipboard.setString(getShareMessage());
+    toast.showToast("Tracking link copied to clipboard", "success");
+  };
+
+  /* ================= INCIDENT ================= */
+  const REPORT_RADIUS_M = 8000;
+
+  const fetchIncidents = async (loc) => {
+    const now = Date.now();
+    if (
+      lastIncidentFetchRef.current &&
+      now - lastIncidentFetchRef.current < 30000
+    ) {
+      return;
+    }
+    lastIncidentFetchRef.current = now;
+
+    try {
+      const res = await fetch(`${BASE_URL}/incidents/recent`);
+      const data = await res.json();
+
+      if (!data?.success || !Array.isArray(data.incidents)) {
+        setIncidentCount(0);
+        setNearbyReportItems([]);
+        mapRef.current?.clearIncidents();
+        return;
+      }
+
+      const normalized = data.incidents
+        .map((i, idx) => {
+          const lat = parseFloat(i.latitude ?? i.lat);
+          const lng = parseFloat(i.longitude ?? i.lng);
+          return {
+            id: i.id ?? `inc-${idx}`,
+            latitude: lat,
+            longitude: lng,
+            severity: i.severity ?? 1,
+            incident_type: i.incident_type || "Safety report",
+            description: (i.description || "").trim(),
+            place_name: (i.place_name || "").trim(),
+          };
+        })
+        .filter(
+          (i) =>
+            Number.isFinite(i.latitude) &&
+            Number.isFinite(i.longitude)
+        );
+
+      const from = { latitude: loc.latitude, longitude: loc.longitude };
+      const withDistance = normalized
+        .map((i) => ({
+          ...i,
+          distanceM: getDistance(from, {
+            latitude: i.latitude,
+            longitude: i.longitude,
+          }),
+        }))
+        .filter((i) => i.distanceM <= REPORT_RADIUS_M)
+        .sort((a, b) => a.distanceM - b.distanceM);
+
+      const forMap = withDistance.map(({ distanceM, ...rest }) => rest);
+
+      setIncidentCount(forMap.length);
+      setNearbyReportItems(withDistance);
+      mapRef.current?.clearIncidents();
+      if (forMap.length) mapRef.current?.addIncidents(forMap);
+    } catch {
+      setIncidentCount(0);
+      setNearbyReportItems([]);
+    }
+  };
+
+  useEffect(() => {
+    if (mapReady && selectedRoute?.coords?.length && !routeDrawn) {
+      drawRouteOnce();
+    }
+  }, [mapReady]);
+
+  /* ================= LOCATION ================= */
+  useEffect(() => {
+    startTracking();
+    return () => {
+      watcher.current?.remove();
+      if (navigationStartTimeoutRef.current) {
+        clearTimeout(navigationStartTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const startTracking = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== "granted") return;
+
+    watcher.current = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.High,
+        distanceInterval: 5,
+      },
+      (loc) => {
+        const coords = {
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+        };
+
+        setLiveLocation(coords);
+
+        const userLngLat = [coords.longitude, coords.latitude];
+
+        // Always compute distance-to-destination and detect arrival
+        const destination = getDestinationLngLat();
+        if (destination) {
+          const distToDest = approxDistanceMeters(userLngLat, destination);
+          setDistanceToDestination(Math.round(distToDest));
+
+          if (isNavigating && distToDest <= DESTINATION_REACHED_METERS) {
+            if (!arrivalAnnouncedRef.current) {
+              arrivalAnnouncedRef.current = true;
+              setIsNavigating(false);
+              setFollowUser(false);
+              speakText("You have reached your destination. Stay safe!");
+              toast.showToast("You have reached your destination. Stay safe!", "success");
+            }
+          }
+        }
+        const nearest = getNearestPointOnRoute(
+          userLngLat,
+          normalizedRouteRef.current
+        );
+
+        const shouldSnapToRoute = nearest?.point;
+
+        const displayLat = shouldSnapToRoute ? nearest.point[1] : coords.latitude;
+        const displayLng = shouldSnapToRoute ? nearest.point[0] : coords.longitude;
+
+        // update marker
+        mapRef.current?.showCurrentLocation(displayLat, displayLng);
+
+        updateNavCamera(
+          displayLat,
+          displayLng,
+          normalizedRouteRef.current,
+          loc?.coords?.heading,
+          loc?.coords?.speed ?? 0
+        );
+
+        if (!routeDrawn && mapReady && selectedRoute?.coords?.length) {
+          drawRouteOnce();
+        }
+
+        if (isNavigating) {
+          if (nearest?.distance != null) {
+            setLastOffRouteDistance(Math.round(nearest.distance));
+            if (nearest.distance > OFF_ROUTE_THRESHOLD_METERS) {
+              rerouteFromCurrentLocation(coords);
+            }
+          }
+          updateNavigationStepState(userLngLat, loc?.coords?.speed ?? 0);
+        }
+        fetchIncidents(coords);
+      }
+    );
+  };
+
+  const startLiveSharing = async (duration) => {
+    try {
+      const existing = await checkExistingSession();
+
+      if (existing) {
+        setTrackingUrl(existing.tracking_url);
+        setIsSharing(true);
+        await AsyncStorage.setItem("isSharing", "true");
+
+        Alert.alert(
+          "Live Location Active",
+          "You are already sharing your location",
+          [
+            {
+              text: "Share Again",
+              onPress: () =>
+                openShareOptions(existing.tracking_url, duration),
+            },
+            {
+              text: "Stop Sharing",
+              onPress: stopSharing,
+            },
+            {
+              text: "Start New",
+              onPress: () => createNewSession(duration),
+            },
+          ]
+        );
+
+        return;
+      }
+
+      createNewSession(duration);
+
+    } catch (e) {
+      console.log(e);
+    }
+  };
+
+
+  const checkExistingSession = async () => {
+    try {
+      const stored = await AsyncStorage.getItem("active_tracking_session");
+      if (!stored) return null;
+
+      const session = JSON.parse(stored);
+
+      if (session.expires_at) {
+        const now = Date.now();
+        const expiry = new Date(session.expires_at).getTime();
+
+        if (now > expiry) {
+          await AsyncStorage.removeItem("active_tracking_session");
+          return null;
+        }
+      }
+
+      return session;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const openShareOptions = (url, duration) => {
+    const msg = getShareMessage(url);
+
+    Alert.alert("Share Live Location", "Choose option", [
+      {
+        text: "WhatsApp",
+        onPress: () =>
+          Linking.openURL(`whatsapp://send?text=${encodeURIComponent(msg)}`),
+      },
+      {
+        text: "Share",
+        onPress: () => Share.share({ message: msg }),
+      },
+      {
+        text: "Copy Link",
+        onPress: async () => {
+          await Clipboard.setString(url);
+          Alert.alert("Copied", "Tracking link copied");
+        },
+      },
+    ]);
+  };
+
+  const createNewSession = async (duration) => {
+    try {
+      const res = await fetch(`${BASE_URL}/create_tracking_session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: 1,
+          user_name: "User",
+          latitude: liveLocation.latitude,
+          longitude: liveLocation.longitude,
+          duration_minutes: duration,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        const session = {
+          session_id: data.session_id,
+          tracking_url: data.tracking_url,
+          expires_at:
+            duration === 0
+              ? null
+              : new Date(Date.now() + duration * 60000).toISOString(),
+        };
+
+        await AsyncStorage.setItem(
+          "active_tracking_session",
+          JSON.stringify(session)
+        );
+
+        await AsyncStorage.setItem("isSharing", "true");
+        setTrackingUrl(data.tracking_url);
+        setIsSharing(true);
+
+        toast.showToast(
+          "Live tracking started. Your location is being shared.",
+          "success"
+        );
+
+        openShareOptions(data.tracking_url, duration);
+      }
+    } catch (e) {
+      console.log("Create session error", e);
+    }
+  };
+
+  const stopSharing = async () => {
+    try {
+      await AsyncStorage.removeItem("active_tracking_session");
+      await AsyncStorage.setItem("isSharing", "false");
+      setIsSharing(false);
+      setTrackingUrl("");
+
+      toast.showToast("Live tracking stopped.", "info");
+    } catch (e) { }
+  };
+
+  /* ================= SHARE ================= */
+  const getShareMessage = (trackingUrl) => {
+    return `🚶‍♀️ HerShield Live Tracking
+    
+  ${userName || "User"} is sharing their live location.
   
-  document.addEventListener("message", function(event) {
-    window.dispatchEvent(new MessageEvent("message", {
-      data: event.data
-    }));
-  });
+  📍 Current Location:
+  https://maps.google.com/?q=${liveLocation?.latitude},${liveLocation?.longitude}
   
-  window.onload = initMap;
-</script>
-</body>
-</html>`;
+  🎯 Destination:
+  ${end.lat}, ${end.lng}
+  
+  🛡️ Route Safety: ${selectedRoute.safety_score}/100
+  ⚠️ Risk Zones: ${selectedRoute.incident_count}
+  
+  ⏱️ Travel Time: ${formatDurationNice(selectedRoute.duration_min)}
+  📏 Distance: ${selectedRoute.distance_km.toFixed(2)} km
+  
+  🔗 Track Live:
+  ${trackingUrl}
+  
+  Stay safe 💜`;
+  };
+
+  const handleStartNavigation = () => {
+    if (!liveLocation) {
+      toast.showToast("Waiting for your live location...", "warning");
+      return;
+    }
+
+    setIsNavigating(true);
+    setFollowUser(true);
+    arrivalAnnouncedRef.current = false;
+
+    const routeCoords = selectedRoute?.coords?.map(getLngLatFromPoint).filter(Boolean);
+    if (!routeCoords?.length) {
+      toast.showToast("Route data unavailable", "error");
+      return;
+    }
+
+    normalizedRouteRef.current = routeCoords;
+    const steps = extractSteps(selectedRoute, routeCoords);
+    setNavigationSteps(steps);
+    currentStepIndexRef.current = 0;
+    setCurrentStepIndex(0);
+    setCurrentStepDistance(null);
+    setLastOffRouteDistance(null);
+    lastVoiceStepRef.current = -1;
+    if (steps[0]?.instruction) {
+      speakText(steps[0].instruction);
+    }
+
+    if (routeCoords.length >= 2) {
+      mapRef.current?.fitRoute(routeCoords);
+    }
+
+    if (navigationStartTimeoutRef.current) {
+      clearTimeout(navigationStartTimeoutRef.current);
+    }
+    navigationStartTimeoutRef.current = setTimeout(() => {
+      mapRef.current?.centerMap(
+        liveLocation.latitude,
+        liveLocation.longitude,
+        { zoom: 18 }
+      );
+    }, 450);
+  };
+
+  /* ================= UI ================= */
+  const nextInstructionText = formatInstructionWithDistance(
+    navigationSteps[currentStepIndex]?.instruction || "Follow the highlighted route",
+    currentStepDistance
+  );
 
   return (
-    <View style={styles.container}>
-      <StatusBar backgroundColor="#4A0D35" barStyle="light-content" />
-
-      {/* Map */}
-      <WebView
-        ref={webRef}
-        source={{ html: htmlContent }}
-        style={styles.map}
-        javaScriptEnabled={true}
-        domStorageEnabled={true}
-        startInLoadingState={true}
-        onMessage={(event) => {
+    <View style={{ flex: 1 }}>
+      <WebMapComponent
+        ref={mapRef}
+        onMapMessage={(e) => {
           try {
-            const data = JSON.parse(event.nativeEvent.data);
-            if (data.type === "mapReady") {
+            const msg = JSON.parse(e.nativeEvent.data);
+
+            if (msg.type === "MAP_READY") {
+              console.log("✅ MAP READY");
               setMapReady(true);
-              if (navigationService) {
-                setTimeout(() => updateMapRoute(), 100);
+            }
+
+            if (msg.type === "MAP_DRAG") {
+              if (isNavigating) {
+                setFollowUser(false);
               }
             }
-          } catch (e) { }
+
+          } catch { }
         }}
-        renderLoading={() => (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#4A0D35" />
-            <Text style={styles.loadingText}>Loading navigation map...</Text>
-          </View>
-        )}
       />
 
-      {/* Top Navigation Bar */}
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={stopNavigation} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+      {/* TOP INFO */}
+      <View style={styles.topCard}>
+        <Text style={styles.title}>
+          🛡 {selectedRoute.safety_score}/100
+        </Text>
+        <Text style={styles.sub}>
+          {selectedRoute.distance_km.toFixed(2)} km •{" "}
+          {formatDurationNice(selectedRoute.duration_min)}
+        </Text>
+      </View>
+      {isNavigating && (
+        <View style={styles.instructionCard}>
+          <Text style={styles.instructionTitle}>
+            {isRerouting ? "Rerouting..." : "Next instruction"}
+          </Text>
+          <Text style={styles.instructionText}>
+            {nextInstructionText}
+          </Text>
+          <Text style={styles.instructionMeta}>
+            Step {Math.min(currentStepIndex + 1, Math.max(navigationSteps.length, 1))}/{Math.max(navigationSteps.length, 1)}
+            {currentStepDistance != null ? `  •  ${currentStepDistance} m` : ""}
+            {distanceToDestination != null ? `  •  ${distanceToDestination} m to destination` : ""}
+            {lastOffRouteDistance != null ? `  •  Route offset ${lastOffRouteDistance} m` : ""}
+          </Text>
+        </View>
+      )}
+
+      {/* FLOATING CONTROLS */}
+      <MapFloatingControls
+        onLocate={() => {
+          setFollowUser(true);
+
+          if (liveLocation) {
+            mapRef.current?.centerMap(
+              liveLocation.latitude,
+              liveLocation.longitude
+            );
+          }
+        }}
+        onReset={() => {
+          if (!mapReady) return;
+          mapRef.current?.resetToKarnataka();
+        }}
+      />
+
+      {/* Start + nearby reports: anchored to bottom (reports lowest) */}
+      <View
+        style={[
+          styles.navBottomStack,
+          { bottom: Math.max(insets.bottom, 8) + 76 },
+        ]}
+      >
+        <TouchableOpacity
+          style={styles.startBtn}
+          onPress={handleStartNavigation}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center" }}>
+            <Ionicons name="navigate" size={20} color="#fff" />
+
+            <Text
+              style={{
+                color: "#fff",
+                fontWeight: "800",
+                fontSize: 16,
+                marginLeft: 8,
+              }}
+            >
+              {isNavigating ? "Navigating..." : "Start Navigation"}
+            </Text>
+          </View>
         </TouchableOpacity>
 
-        <View style={styles.topInfo}>
-          <Text style={styles.destinationName} numberOfLines={1}>
-            {locationName || "Destination"}
-          </Text>
-          <View style={styles.etaContainer}>
-            <View style={styles.etaItem}>
-              <Ionicons name="time-outline" size={14} color="rgba(255,255,255,0.8)" />
-              <Text style={styles.etaText}>
-                {allRoutes?.[selectedRouteIndex]?.duration || 0} min
+        {nearbyReportItems.length > 0 && !showReportsPanel && (
+          <TouchableOpacity
+            style={styles.reportsShowBar}
+            onPress={() => setShowReportsPanel(true)}
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name="chevron-up"
+              size={18}
+              color="#FFB74D"
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.reportsShowBarText}>
+              Nearby reports ({nearbyReportItems.length})
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {nearbyReportItems.length > 0 && showReportsPanel && (
+          <View style={styles.reportsStrip} pointerEvents="box-none">
+            <View style={styles.reportsStripHeaderRow}>
+              <Text style={styles.reportsStripTitle} numberOfLines={1}>
+                Nearby reports ({nearbyReportItems.length})
               </Text>
+              <TouchableOpacity
+                style={styles.reportsHideBtnWrap}
+                onPress={() => setShowReportsPanel(false)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
+                <Text style={styles.reportsHideLabel}>Hide</Text>
+                <Ionicons
+                  name="chevron-down"
+                  size={20}
+                  color="#FFB74D"
+                  style={{ marginLeft: 4 }}
+                />
+              </TouchableOpacity>
             </View>
-            <View style={styles.etaSeparator} />
-            <View style={styles.etaItem}>
-              <Ionicons name="walk-outline" size={14} color="rgba(255,255,255,0.8)" />
-              <Text style={styles.etaText}>
-                {allRoutes?.[selectedRouteIndex]?.distance || 0} km
-              </Text>
-            </View>
+            <Text style={styles.reportsStripHint}>
+              Scroll for details · Hide for full map
+            </Text>
+            <ScrollView
+              style={styles.reportsStripScroll}
+              contentContainerStyle={styles.reportsStripScrollContent}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="handled"
+            >
+              {nearbyReportItems.map((item) => (
+                <View key={String(item.id)} style={styles.reportCard}>
+                  <Text style={styles.reportCardType} numberOfLines={2}>
+                    {item.incident_type}
+                  </Text>
+                  <Text style={styles.reportCardDesc}>
+                    {item.description || "No description provided"}
+                  </Text>
+                  {item.place_name ? (
+                    <Text style={styles.reportCardPlace}>
+                      📍 {item.place_name}
+                    </Text>
+                  ) : (
+                    <Text style={styles.reportCardPlaceMuted}>
+                      📍 Location on map
+                    </Text>
+                  )}
+                  <Text style={styles.reportCardDist}>
+                    {item.distanceM < 1000
+                      ? `${Math.round(item.distanceM)} m away`
+                      : `${(item.distanceM / 1000).toFixed(1)} km away`}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
           </View>
-        </View>
+        )}
+      </View>
+
+      {/* ACTION BUTTONS */}
+      <View style={styles.actions}>
+        <TouchableOpacity
+          style={styles.shareBtn}
+          onPress={() => setShareVisible(true)}
+        >
+          <Ionicons name="share-social" size={22} color="#fff" />
+        </TouchableOpacity>
 
         <TouchableOpacity
-          onPress={() => setShowRouteOptions(true)}
-          style={styles.routeButton}
+          style={styles.sosBtn}
+          onPress={() => navigation.navigate("SOS")}
         >
-          <Ionicons name="swap-horizontal" size={22} color="#fff" />
+          <Text style={styles.sosText}>SOS</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Route Options Modal */}
-      <Modal
-        visible={showRouteOptions}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowRouteOptions(false)}
-      >
+      {/* SHARE MODAL */}
+      <Modal visible={shareVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <TouchableOpacity
-            style={styles.modalBackdrop}
-            activeOpacity={1}
-            onPress={() => setShowRouteOptions(false)}
-          />
-          <View style={styles.modalContent}>
-            <View style={styles.modalHandle} />
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Choose Your Route</Text>
-              <TouchableOpacity
-                onPress={() => setShowRouteOptions(false)}
-                style={styles.modalCloseButton}
-              >
-                <Ionicons name="close" size={24} color="#666" />
-              </TouchableOpacity>
-            </View>
+          <View style={styles.modal}>
 
-            <Text style={styles.modalSubtitle}>
-              {allRoutes?.length || 0} route options available
-            </Text>
+            {isSharing ? (
+              /* ================= ACTIVE SHARING UI ================= */
+              <>
+                <Text style={styles.modalTitle}>Live Location Active</Text>
 
-            <ScrollView
-              style={styles.routesList}
-              showsVerticalScrollIndicator={false}
+                <Text style={{ color: "green", marginBottom: 15 }}>
+                  ● You are currently sharing your location
+
+                </Text>
+                <Text style={{ marginBottom: 10, color: "#555" }}>
+                  ⏱ {remainingTime}
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.option}
+                  onPress={() => openShareOptions(trackingUrl, 0)}
+                >
+                  <Text>Share Again</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.option}
+                  onPress={stopSharing}
+                >
+                  <Text style={{ color: "red" }}>Stop Sharing</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              /* ================= NORMAL SHARE UI ================= */
+              <>
+                <Text style={styles.modalTitle}>Share Live Location</Text>
+
+                <View style={styles.timeRow}>
+                  {[15, 30, 45, 60].map((t) => (
+                    <TouchableOpacity
+                      key={t}
+                      style={[
+                        styles.timeBtn,
+                        selectedDuration === t && styles.activeTime,
+                      ]}
+                      onPress={() => startLiveSharing(t)}
+                    >
+                      <Text>{t} min</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* UNTIL STOP */}
+                <TouchableOpacity
+                  style={styles.option}
+                  onPress={() => startLiveSharing(0)}
+                >
+                  <Text>Until I stop</Text>
+                </TouchableOpacity>
+
+                {/* CUSTOM */}
+                <View style={{ flexDirection: "row", marginTop: 10 }}>
+                  <TextInput
+                    placeholder="Custom minutes"
+                    keyboardType="numeric"
+                    value={customTime}
+                    onChangeText={setCustomTime}
+                    style={{
+                      flex: 1,
+                      borderWidth: 1,
+                      borderColor: "#ccc",
+                      padding: 10,
+                      borderRadius: 10,
+                    }}
+                  />
+                  <TouchableOpacity
+                    style={{
+                      backgroundColor: "#570a1c",
+                      padding: 10,
+                      marginLeft: 10,
+                      borderRadius: 10,
+                    }}
+                    onPress={() => {
+                      if (customTime) startLiveSharing(parseInt(customTime));
+                    }}
+                  >
+                    <Text style={{ color: "#fff" }}>Start</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {/* CLOSE BUTTON (COMMON) */}
+            <TouchableOpacity
+              style={styles.close}
+              onPress={() => setShareVisible(false)}
             >
-              {allRoutes?.map((route, index) => (
-                <RouteOptionItem
-                  key={index}
-                  route={route}
-                  index={index}
-                  isSelected={selectedRouteIndex === index}
-                  onSelect={switchRoute}
-                />
-              ))}
-            </ScrollView>
+              <Text style={{ color: "#fff" }}>Close</Text>
+            </TouchableOpacity>
 
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.recalculateButton}
-                onPress={fetchNewRoutes}
-                disabled={recalculating}
-              >
-                {recalculating ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <Ionicons name="refresh" size={20} color="#fff" />
-                    <Text style={styles.recalculateButtonText}>Find New Routes</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.continueButton}
-                onPress={() => setShowRouteOptions(false)}
-              >
-                <Text style={styles.continueButtonText}>Continue</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       </Modal>
-
-      {/* Navigation Instructions */}
-      {currentStep && (
-        <View style={styles.instructionCard}>
-          <View style={styles.instructionHeader}>
-            <View style={styles.turnIconContainer}>
-              <Ionicons
-                name={getTurnIcon(currentStep.type)}
-                size={28}
-                color="#fff"
-              />
-            </View>
-            <View style={styles.instructionContent}>
-              <Text style={styles.instructionText}>
-                {currentStep.text}
-              </Text>
-
-              {distanceToNext > 0 && currentStep.type !== 'destination' && (
-                <Text style={styles.distanceText}>
-                  {getDistanceText(distanceToNext)} to next turn
-                </Text>
-              )}
-            </View>
-          </View>
-
-          {/* Progress Bar */}
-          <View style={styles.progressContainer}>
-            <View style={styles.progressLabels}>
-              <Text style={styles.progressLabel}>Progress</Text>
-              <Text style={styles.progressPercentage}>{Math.round(progress)}%</Text>
-            </View>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${progress}%` }]} />
-            </View>
-          </View>
-
-          {/* Route Info */}
-          <View style={styles.routeInfo}>
-            <View style={styles.routeInfoItem}>
-              <Ionicons name="walk-outline" size={16} color="#666" />
-              <Text style={styles.routeInfoText}>
-                {allRoutes?.[selectedRouteIndex]?.distance || 0} km
-              </Text>
-            </View>
-            <View style={styles.routeInfoItem}>
-              <Ionicons name="time-outline" size={16} color="#666" />
-              <Text style={styles.routeInfoText}>
-                {allRoutes?.[selectedRouteIndex]?.duration || 0} min
-              </Text>
-            </View>
-            <View style={[
-              styles.riskBadge,
-              { backgroundColor: getRiskColor(allRoutes?.[selectedRouteIndex]?.total_risk || 0) }
-            ]}>
-              <Text style={styles.riskText}>
-                {getRiskText(allRoutes?.[selectedRouteIndex]?.total_risk || 0)}
-              </Text>
-            </View>
-          </View>
-        </View>
-      )}
-
-      {/* Bottom Controls */}
-      <View style={styles.bottomControls}>
-        <TouchableOpacity style={styles.controlButton}>
-          <Ionicons name="volume-high-outline" size={24} color="#fff" />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.controlButton} onPress={fetchNewRoutes}>
-          <Ionicons name="refresh-outline" size={24} color="#fff" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.mainControlButton}
-          onPress={togglePause}
-        >
-          <Ionicons
-            name={isPaused ? "play" : "pause"}
-            size={28}
-            color="#fff"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.controlButton}>
-          <Ionicons name="alert-circle-outline" size={24} color="#fff" />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.controlButton}>
-          <Ionicons name="menu-outline" size={24} color="#fff" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Next Step Preview */}
-      {nextStep && (
-        <View style={styles.nextStepCard}>
-          <Text style={styles.nextStepLabel}>Next:</Text>
-          <View style={styles.nextStepContent}>
-            <View style={styles.nextStepIcon}>
-              <Ionicons
-                name={getTurnIcon(nextStep.type)}
-                size={18}
-                color="#666"
-              />
-            </View>
-            <Text style={styles.nextStepText} numberOfLines={1}>
-              {nextStep.text}
-            </Text>
-          </View>
-        </View>
-      )}
-
-      {/* Recalculating Overlay */}
-      {recalculating && (
-        <View style={styles.recalculatingOverlay}>
-          <View style={styles.recalculatingContainer}>
-            <ActivityIndicator size="large" color="#4A0D35" />
-            <Text style={styles.recalculatingText}>Finding new routes...</Text>
-          </View>
-        </View>
-      )}
     </View>
   );
 }
 
+/* ================= STYLES ================= */
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-  map: {
-    flex: 1,
-    width: '100%',
-    height: '100%',
-  },
-  loadingContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#f5f5f5',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
-  },
-  topBar: {
+  topCard: {
     position: "absolute",
-    top: Platform.OS === 'ios' ? 44 : StatusBar.currentHeight,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#4A0D35',
-    zIndex: 1000,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  topInfo: {
-    flex: 1,
-  },
-  destinationName: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  etaContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  etaItem: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  etaText: {
-    color: "rgba(255, 255, 255, 0.9)",
-    fontSize: 14,
-    marginLeft: 4,
-  },
-  etaSeparator: {
-    width: 1,
-    height: 14,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
-    marginHorizontal: 12,
-  },
-  routeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  modalBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: height * 0.85,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
-  },
-  modalHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#e0e0e0',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#333',
-  },
-  modalCloseButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f5f5f5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalSubtitle: {
-    fontSize: 15,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 24,
-  },
-  routesList: {
-    maxHeight: height * 0.45,
-    paddingHorizontal: 24,
-  },
-  routeOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    top: 50,
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(20,20,20,0.55)",
     padding: 16,
-    borderRadius: 16,
-    backgroundColor: '#fff',
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  selectedRouteOption: {
-    borderColor: '#007BFF',
-    backgroundColor: '#f5f9ff',
-  },
-  routeIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  routeIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-  },
-  routeDetails: {
-    flex: 1,
-  },
-  routeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 10,
-  },
-  routeTitleContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  routeType: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#333',
-    flexShrink: 1,
-  },
-  selectedIndicator: {
-    backgroundColor: '#007BFF',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    marginLeft: 8,
-  },
-  selectedText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  riskBadgeSmall: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  riskTextSmall: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  routeStatsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  statItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statText: {
-    fontSize: 14,
-    color: '#666',
-    marginLeft: 6,
-    fontWeight: '500',
-  },
-  modalButtons: {
-    paddingHorizontal: 24,
-    marginTop: 20,
-  },
-  recalculateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  recalculateButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  continueButton: {
-    padding: 16,
-    backgroundColor: '#4A0D35',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  continueButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  instructionCard: {
-    position: "absolute",
-    top: Platform.OS === 'ios' ? 140 : 120,
-    left: 20,
-    right: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.95)",
     borderRadius: 20,
-    padding: 20,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 10,
-    zIndex: 900,
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 12,
   },
-  instructionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  turnIconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "#4A0D35",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 16,
-  },
-  instructionContent: {
-    flex: 1,
-  },
-  instructionText: {
+
+  title: {
+    color: "#fff",
+    fontWeight: "800",
     fontSize: 20,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 6,
   },
-  distanceText: {
-    fontSize: 15,
-    color: "#666",
-    fontWeight: '500',
+
+  sub: {
+    color: "#d1d1d1",
+    marginTop: 4,
+    fontSize: 13,
   },
-  progressContainer: {
-    marginBottom: 20,
-  },
-  progressLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  progressLabel: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  progressPercentage: {
-    fontSize: 14,
-    color: '#4A0D35',
-    fontWeight: '600',
-  },
-  progressBar: {
-    height: 8,
-    backgroundColor: "#e9ecef",
-    borderRadius: 4,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: "#00CC66",
-    borderRadius: 4,
-  },
-  routeInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  routeInfoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  routeInfoText: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '500',
-    marginLeft: 6,
-  },
-  riskBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  riskText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  bottomControls: {
+
+  actions: {
     position: "absolute",
     bottom: 30,
     left: 20,
     right: 20,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    borderRadius: 30,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
   },
-  controlButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  mainControlButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "#4A0D35",
-    alignItems: "center",
-    justifyContent: "center",
-    shadowColor: "#4A0D35",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  nextStepCard: {
-    position: "absolute",
-    bottom: 110,
-    left: 20,
-    right: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.9)",
-    borderRadius: 16,
+
+  shareBtn: {
+    backgroundColor: "#6A0D1B",
     padding: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 6,
+    borderRadius: 50,
+    elevation: 10,
   },
-  nextStepLabel: {
+
+  sosBtn: {
+    backgroundColor: "#FF3B30",
+    paddingVertical: 16,
+    paddingHorizontal: 22,
+    borderRadius: 30,
+    elevation: 12,
+  },
+
+  sosText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.5)",
+  },
+
+  modal: {
+    backgroundColor: "#fff",
+    padding: 20,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+
+  modalTitle: {
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+
+  timeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+
+  timeBtn: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: "#eee",
+  },
+
+  activeTime: {
+    backgroundColor: "#570a1c",
+  },
+
+  option: {
+    padding: 14,
+    borderBottomWidth: 1,
+    borderColor: "#eee",
+  },
+
+  close: {
+    backgroundColor: "#570a1c",
+    padding: 14,
+    borderRadius: 10,
+    marginTop: 10,
+    alignItems: "center",
+  },
+  startBtn: {
+    backgroundColor: "#1E88E5",
+    paddingVertical: 18,
+    borderRadius: 20,
+    alignItems: "center",
+
+    shadowColor: "#1E88E5",
+    shadowOpacity: 0.7,
+    shadowRadius: 20,
+    elevation: 15,
+  },
+  instructionCard: {
+    position: "absolute",
+    top: 50,
+    left: 16,
+    right: 16,
+    backgroundColor: "rgba(15,15,15,0.86)",
+    borderRadius: 14,
+    padding: 12,
+  },
+  instructionTitle: {
+    color: "#4FC3F7",
+    fontWeight: "700",
     fontSize: 12,
-    color: "#999",
-    marginBottom: 8,
-    fontWeight: '500',
+    marginBottom: 4,
   },
-  nextStepContent: {
+  instructionText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  instructionMeta: {
+    color: "#d2d2d2",
+    marginTop: 6,
+    fontSize: 12,
+  },
+  navBottomStack: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+  },
+  reportsShowBar: {
+    marginTop: 10,
     flexDirection: "row",
     alignItems: "center",
-  },
-  nextStepIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#f5f5f5",
-    alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    backgroundColor: "rgba(18,18,18,0.92)",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    elevation: 6,
   },
-  nextStepText: {
-    fontSize: 16,
-    color: "#333",
-    fontWeight: '500',
+  reportsShowBarText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
+    flexShrink: 1,
+  },
+  reportsStrip: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 188,
+    left: 12,
+    right: 12,
+    bottom: 188,
+    maxHeight: 268,
+    backgroundColor: "rgba(18,18,18,0.92)",
+    borderRadius: 14,
+    paddingTop: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  reportsStripHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+  },
+  reportsStripTitle: {
+    color: "#FFB74D",
+    fontWeight: "700",
+    fontSize: 12,
     flex: 1,
+    marginRight: 8,
   },
-  recalculatingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 2000,
+  reportsStripHint: {
+    color: "#9e9e9e",
+    fontSize: 10,
+    paddingHorizontal: 12,
+    marginBottom: 6,
   },
-  recalculatingContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 30,
-    alignItems: 'center',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 8,
+  reportsHideBtnWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 4,
+    paddingLeft: 8,
   },
-  recalculatingText: {
-    color: '#333',
-    fontSize: 16,
-    marginTop: 16,
-    fontWeight: '500',
+  reportsHideLabel: {
+    color: "#FFB74D",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  reportsStripScroll: {
+    maxHeight: 210,
+    paddingHorizontal: 4,
+  },
+  reportsStripScrollContent: {
+    paddingHorizontal: 10,
+    paddingBottom: 6,
+  },
+  reportCard: {
+    alignSelf: "stretch",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  reportCardType: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  reportCardDesc: {
+    color: "#e0e0e0",
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  reportCardPlace: {
+    color: "#90CAF9",
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 10,
+    fontWeight: "600",
+  },
+  reportCardPlaceMuted: {
+    color: "#78909C",
+    fontSize: 11,
+    marginTop: 10,
+    fontStyle: "italic",
+  },
+  reportCardDist: {
+    color: "#B0BEC5",
+    fontSize: 11,
+    marginTop: 8,
+    fontWeight: "700",
   },
 });

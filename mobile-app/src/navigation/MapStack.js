@@ -1,4 +1,3 @@
-// src/navigation/MapStack.js
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import MapHomeScreen from "../screens/MapHomeScreen";
@@ -18,24 +17,24 @@ export default function MapStack() {
       }}
     >
       <Stack.Screen name="MapHome" component={MapHomeScreen} />
-      <Stack.Screen 
-        name="Search" 
-        component={SearchScreen} 
+      <Stack.Screen
+        name="Search"
+        component={SearchScreen}
         options={{
           presentation: "modal",
           animation: "slide_from_bottom",
         }}
       />
-      <Stack.Screen 
-        name="RouteDetails" 
-        component={RouteDetailsScreen} 
+      <Stack.Screen
+        name="RouteDetails"
+        component={RouteDetailsScreen}
         options={{
           animation: "slide_from_right",
         }}
       />
-      <Stack.Screen 
-        name="Navigation" 
-        component={NavigationScreen} 
+      <Stack.Screen
+        name="Navigation"
+        component={NavigationScreen}
         options={{
           gestureEnabled: false,
           animation: "fade",

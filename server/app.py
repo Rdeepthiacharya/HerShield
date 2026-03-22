@@ -52,27 +52,22 @@ def get_db():
 def get_public_url():
     """Get public URL for tracking"""
     try:
-        # Try ngrok first
         if NGROK_AUTHTOKEN:
             try:
                 tunnels = ngrok.get_tunnels()
-                # Check if tunnels list is not empty
                 if tunnels and len(tunnels) > 0:
                     return tunnels[0].public_url.rstrip('/')
                 else:
                     logger.warning("Ngrok tunnels list is empty")
             except Exception as ngrok_error:
                 logger.warning(f"Ngrok tunnel check failed: {ngrok_error}")
-        
-        # Fallback methods
+
         try:
-            # Try to get server IP
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(('8.8.8.8', 80))
             server_ip = s.getsockname()[0]
             s.close()
-            
-            # Check if IP is public
+
             if server_ip.startswith(('192.168.', '10.', '172.')):
                 logger.info(f"Using local IP: {server_ip}")
                 return f"http://{server_ip}:5000"
@@ -82,8 +77,7 @@ def get_public_url():
                 
         except Exception as ip_error:
             logger.warning(f"IP detection failed: {ip_error}")
-        
-        # Final fallback
+
         return "http://localhost:5000"
         
     except Exception as e:
@@ -111,7 +105,7 @@ def reverse_geocode(lat, lon) -> str:
                 res = r.json().get("results")
                 if res and len(res) > 0:
                     return res[0].get("formatted", "")
-        # fallback
+
         r = requests.get(
             "https://nominatim.openstreetmap.org/reverse",
             params={"lat": lat, "lon": lon, "format": "json"},
@@ -127,9 +121,8 @@ def reverse_geocode(lat, lon) -> str:
 # Travel mode speeds (km/h)
 TRAVEL_SPEEDS = {
     "walk": 4.5,
-    "vehicle": 20.0  # Average speed for all vehicles
+    "vehicle": 20.0 
 }
-
 
 def send_sms(numbers, message) -> bool:
     """Send SMS via Fast2SMS."""
@@ -183,10 +176,10 @@ def save_sos_log(user_id, trigger_type, location, message, recipients=None, stat
         logger.error(f"Failed to save SOS log: {e}")
 
 
-def a_star_safe_path(start, end, incidents, max_time=3.0):  # Add max_time parameter
+def a_star_safe_path(start, end, incidents, max_time=3.0):
     """Optimized A* pathfinding with timeout"""
-    STEP = 0.004  # ~400m
-    MAX_ITERS = 500  # Reduced from 800
+    STEP = 0.004 
+    MAX_ITERS = 500 
     start_time = time.time()
     
     def h(a, b):
@@ -209,58 +202,49 @@ def a_star_safe_path(start, end, incidents, max_time=3.0):  # Add max_time param
     iterations = 0
 
     while frontier and iterations < MAX_ITERS:
-        # Check timeout every 10 iterations
         if iterations % 10 == 0 and (time.time() - start_time) > max_time:
-            print(f"⏰ Pathfinding timeout after {iterations} iterations")
+            print(f"Pathfinding timeout after {iterations} iterations")
             break
             
         _, current = heapq.heappop(frontier)
         iterations += 1
 
-        # If we're close enough to destination, stop
-        if h(current, end) < 0.5:  # 500m from destination
+        if h(current, end) < 0.5: 
             break
 
         for nxt in neighbors(current):
-            # Skip if we've already visited too many times
             if iterations > MAX_ITERS * 0.8:
-                continue
-                
+                continue               
             d_cost = geodesic(current, nxt).km
             risk = 0
 
-            # Only check nearby incidents (optimization)
             for inc in incidents:
                 d = geodesic(nxt, (inc["lat"], inc["lng"])).km
-                if d < 1.0:  # Reduced from 1.5km
+                if d < 1.0: 
                     risk += inc["severity"] / (1 + d)
 
-            new_cost = cost[current] + d_cost + (risk * 2)  # Reduced risk multiplier
+            new_cost = cost[current] + d_cost + (risk * 2)
 
             if nxt not in cost or new_cost < cost[nxt]:
                 cost[nxt] = new_cost
                 heapq.heappush(frontier, (new_cost + h(nxt, end), nxt))
                 came[nxt] = current
 
-    # Reconstruct path
     if not came:
         return []
-
-    # Find the closest node to end
     end_node = min(came.keys(), key=lambda n: h(n, end))
     path = []
 
     while end_node:
         path.append(end_node)
         end_node = came[end_node]
-        if len(path) > 100:  # Prevent infinite loops
+        if len(path) > 100:
             break
 
     path = list(reversed(path))
     
     print(f"✅ Path found: {len(path)} points, {iterations} iterations, {time.time()-start_time:.2f}s")
-    
-    # If path is too short, return straight line
+
     if len(path) < 2:
         print("⚠️ Path too short, returning straight line")
         return [start, end]
@@ -301,11 +285,9 @@ def debug_incidents():
         db = get_db()
         cursor = db.cursor(dictionary=True)
 
-        # Total count
         cursor.execute("SELECT COUNT(*) as total FROM incident_reports")
         total = cursor.fetchone()['total']
 
-        # Recent incidents
         cursor.execute("""
             SELECT id, latitude, longitude, severity, incident_type, created_at
             FROM incident_reports
@@ -551,8 +533,7 @@ def get_user_stats(user_id):
     try:
         db = get_db()
         cursor = db.cursor(dictionary=True)
-        
-        # Get report count from incident_reports (not user_reports)
+
         cursor.execute(
             """
             SELECT COUNT(*) as reports_filed 
@@ -562,8 +543,7 @@ def get_user_stats(user_id):
             (user_id,)
         )
         report_data = cursor.fetchone()
-        
-        # Get SOS count from sos_logs
+
         cursor.execute(
             """
             SELECT COUNT(*) as sos_used 
@@ -689,10 +669,8 @@ def trigger_sos():
     if not user or not contacts:
         return jsonify({"error": "No contacts found"}), 404
 
-    # SIMPLE & CLEAR - Just Google Maps link
     if lat and lon:
         location_link = f"https://maps.google.com/?q={lat},{lon}"
-        # Optional: Add "Open in Google Maps" text to make it clear
         location_display = f"https://maps.google.com/?q={lat},{lon}"
         location_available = True
     else:
@@ -700,7 +678,6 @@ def trigger_sos():
         location_display = "Location unavailable"
         location_available = False
 
-    # Clean, urgent message - ONE MAP LINK
     message = f"""
 ⚠️ SOS ALERT ⚠️
 
@@ -723,7 +700,7 @@ Sent via HerShield Safety App
             "success": True,
             "contacts": contacts,
             "message": message,
-            "location_link": location_link,  # Google Maps link
+            "location_link": location_link, 
             "coordinates": f"{lat},{lon}" if location_available else None,
         }
     ), 200
@@ -735,7 +712,7 @@ def shorten_url(long_url):
         r = requests.get("https://tinyurl.com/api-create.php?url=" + long_url)
         return r.text.strip()
     except:
-        return long_url   # fallback
+        return long_url 
 
 
 @app.route("/send_sos_sms", methods=["POST"])
@@ -747,7 +724,7 @@ def send_sos_sms():
     lon = data.get("lon")
     auto = data.get("auto", False)
     tracking_url = data.get("tracking_url", "")
-    trigger_reason = data.get("trigger_reason", "")  # Add this for auto voice
+    trigger_reason = data.get("trigger_reason", "")
 
     if not user_id:
         return jsonify({"error": "user_id required"}), 400
@@ -772,20 +749,18 @@ def send_sos_sms():
 
     recipients = [c["mobile_number"] for c in contacts]
     user_name = user["fullname"]
-    
-    # Get Google Maps link for fallback
+
     google_maps_link = ""
     if lat and lon:
         long_map_link = f"https://www.google.com/maps?q={lat},{lon}"
         google_maps_link = shorten_url(long_map_link)
         location_store = f"{lat},{lon}"
     else:
-        google_maps_link = ""  # Empty if no coordinates
+        google_maps_link = "" 
         location_store = "Unknown"
 
     # ====== AUTO VOICE MESSAGE ======
     if auto and trigger_reason:
-        # Auto-triggered SOS message
         message = f"""🚨 AUTOMATIC EMERGENCY ALERT
 
 {user_name} may be in danger!
@@ -801,7 +776,6 @@ Please check on them immediately!
 Sent via HerShield Auto-SOS"""
         
     elif tracking_url:
-        # WITH LIVE TRACKING - Show only this link
         message = f"""⚠️ EMERGENCY SOS ALERT 
 
 {user_name} needs IMMEDIATE help!
@@ -814,7 +788,6 @@ Sent via HerShield Auto-SOS"""
 Sent via HerShield App"""
         
     elif google_maps_link:
-        # WITHOUT LIVE TRACKING - Show Google Maps as fallback
         message = f"""⚠️ SOS Alert
 
 {user_name} needs help!
@@ -827,7 +800,6 @@ Please check on them immediately.
 Sent via HerShield App"""
         
     else:
-        # NO LOCATION AVAILABLE
         message = f"""⚠️ SOS Alert
 
 {user_name} needs help!
@@ -838,12 +810,8 @@ Please check on them immediately.
 
 Sent via HerShield App"""
 
-    # Try sending SMS
     sms_ok = send_sms(recipients, message)
-    
-    # Save to logs
     trigger_type = "auto_voice" if auto and trigger_reason else ("auto" if auto else "manual")
-    
     save_sos_log(
         user_id,
         trigger_type,
@@ -864,8 +832,7 @@ Sent via HerShield App"""
 
 
 
-# Debug endpoint
-
+# ======Debug endpoint=======
 @app.route("/submit_report", methods=["POST"])
 def submit_report():
     try:
@@ -878,14 +845,12 @@ def submit_report():
         if not all([latitude, longitude, incident_type]):
             return jsonify({"success": False, "error": "Missing required fields"}), 400
 
-        # Optional fields
-        user_id = data.get("user_id")  # Can be NULL for anonymous
+        user_id = data.get("user_id") 
         severity = data.get("severity", 1)
         description = data.get("description", "")
         place_name = data.get("place_name", "") or reverse_geocode(latitude, longitude)
         location_type = data.get("location_type", "gps_auto")
 
-        # Save to incident_reports ONLY
         db = get_db()
         cursor = db.cursor()
 
@@ -924,37 +889,34 @@ def submit_report():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-# Helper function for relative time
+# ======Helper function for relative time===
 def get_relative_time(created_at):
     """Convert datetime to relative time string like '2 days ago'"""
     if not created_at:
         return "Recently"
-    
-    # Parse the datetime if it's a string
+
     if isinstance(created_at, str):
         dt = parser.isoparse(created_at)
     else:
         dt = created_at
-    
-    # Make sure it's timezone aware (UTC)
+
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     
     now = datetime.now(timezone.utc)
     diff = now - dt
-    
-    # Convert to seconds
+
     seconds = diff.total_seconds()
     
     if seconds < 60:
         return "Just now"
-    elif seconds < 3600:  # Less than 1 hour
+    elif seconds < 3600: 
         minutes = int(seconds // 60)
         return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-    elif seconds < 86400:  # Less than 1 day
+    elif seconds < 86400: 
         hours = int(seconds // 3600)
         return f"{hours} hour{'s' if hours != 1 else ''} ago"
-    elif seconds < 2592000:  # Less than 30 days
+    elif seconds < 2592000:
         days = int(seconds // 86400)
         if days == 1:
             return "Yesterday"
@@ -968,7 +930,7 @@ def get_relative_time(created_at):
             return "3 weeks ago"
         else:
             return "4 weeks ago"
-    elif seconds < 31536000:  # Less than 1 year
+    elif seconds < 31536000:
         months = int(seconds // 2592000)
         if months == 1:
             return "1 month ago"
@@ -982,14 +944,13 @@ def get_relative_time(created_at):
             return f"{years} years ago"
 
 
-# Update the /incidents/recent endpoint to include relative_time
+# ==== recent incidents endpoint====
 @app.route("/incidents/recent", methods=["GET"])
 def get_recent_incidents():
     try:
         db = get_db()
         cursor = db.cursor(dictionary=True)
         
-        # Get all incidents, not just recent 48 hours
         cursor.execute("""
             SELECT 
                 id,
@@ -1011,8 +972,7 @@ def get_recent_incidents():
         incidents = cursor.fetchall()
         cursor.close()
         db.close()
-        
-        # Format the response
+
         formatted_incidents = []
         for incident in incidents:
             relative_time = get_relative_time(incident["created_at"])
@@ -1028,7 +988,7 @@ def get_recent_incidents():
                 "location_type": incident["location_type"],
                 "is_verified": bool(incident["is_verified"]),
                 "created_at": incident["created_at"].isoformat() if incident["created_at"] else None,
-                "relative_time": relative_time,  # Add relative time
+                "relative_time": relative_time,
                 "updated_at": incident["updated_at"].isoformat() if incident["updated_at"] else None,
             })
         
@@ -1043,6 +1003,7 @@ def get_recent_incidents():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ========== incident_reports ==========
 @app.route("/incident_reports/<int:user_id>", methods=["GET"])
 def get_user_incident_reports(user_id):
     try:
@@ -1073,8 +1034,7 @@ def get_user_incident_reports(user_id):
         
         cursor.close()
         db.close()
-        
-        # Format the response
+
         formatted_reports = []
         for report in reports:
             relative_time = get_relative_time(report["created_at"])
@@ -1090,7 +1050,7 @@ def get_user_incident_reports(user_id):
                 "location_type": report["location_type"],
                 "is_verified": bool(report["is_verified"]),
                 "created_at": report["created_at"].isoformat() if report["created_at"] else None,
-                "relative_time": relative_time,  # Add relative time
+                "relative_time": relative_time, 
                 "updated_at": report["updated_at"].isoformat() if report["updated_at"] else None,
             })
         
@@ -1118,16 +1078,13 @@ def create_tracking_session():
         
         if not all([latitude, longitude]):
             return jsonify({"success": False, "error": "Location required"}), 400
-        
-        # Generate unique session ID
+
         session_id = secrets.token_urlsafe(16)
-        
-        # Calculate expiry time
+
         expires_at = None
         if duration_minutes > 0:
             expires_at = datetime.now() + timedelta(minutes=duration_minutes)
-        
-        # Initial location
+
         initial_location = {
             "lat": float(latitude),
             "lng": float(longitude),
@@ -1135,8 +1092,7 @@ def create_tracking_session():
             "speed": 0,
             "accuracy": 0
         }
-        
-        # Store session
+
         tracking_sessions[session_id] = {
             "user_id": user_id,
             "user_name": user_name,
@@ -1149,56 +1105,44 @@ def create_tracking_session():
             "total_updates": 1
         }
         
-        # ====== FIXED: Create PROPER publicly accessible URL ======
-        
-        # Method 1: Try to get public URL from ngrok if running
+        # ====== accessible URL ======
         public_url = None
         try:
             if NGROK_AUTHTOKEN:
-                # Get ngrok tunnels
+
                 tunnels = ngrok.get_tunnels()
                 if tunnels:
                     public_url = tunnels[0].public_url
                     logger.info(f"Using ngrok public URL: {public_url}")
         except:
             pass
-        
-        # Method 2: Use request host with fallback
+
         if not public_url:
-            # Check if request.host is localhost or internal IP
             request_host = request.host
             if request_host.startswith(('localhost', '127.', '192.168.', '10.', '172.')):
-                # This is local/internal, need external URL
-                # Try to get server's public IP
                 try:
                     import socket
                     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     s.connect(('8.8.8.8', 80))
                     server_ip = s.getsockname()[0]
                     s.close()
-                    
-                    # Create URL with public IP (if you have port forwarding)
+
                     public_url = f"http://{server_ip}:5000"
                     logger.info(f"Using server IP: {public_url}")
-                    
-                    # Check if this IP is public
+
                     if server_ip.startswith(('192.168.', '10.', '172.')):
                         logger.warning("Server IP is private, URL may not be accessible!")
-                        # Fallback to ngrok setup message
+
                         public_url = "https://setup-ngrok-first.hersheild.com"
                 except:
                     public_url = "https://setup-server-properly.hersheild.com"
             else:
-                # Use request host as-is
                 public_url = f"http://{request_host}"
-        
-        # Ensure URL doesn't have double slashes
+
         public_url = public_url.rstrip('/')
-        
-        # Create the tracking URL - SIMPLE and CLEAN
+
         tracking_url = f"{public_url}/track/{session_id}"
-        
-        # Also create Google Maps link for reference
+
         google_maps_link = f"https://www.google.com/maps?q={latitude},{longitude}"
         
         logger.info(f"Created tracking session: {session_id}")
@@ -1208,7 +1152,7 @@ def create_tracking_session():
         return jsonify({
             "success": True,
             "session_id": session_id,
-            "tracking_url": tracking_url,  # clickable
+            "tracking_url": tracking_url,
             "expires_at": expires_at.isoformat() if expires_at else None,
             "message": "Tracking session created successfully"
         }), 200
@@ -1226,8 +1170,7 @@ def update_location(session_id):
             return jsonify({"success": False, "error": "Invalid session"}), 404
         
         session = tracking_sessions[session_id]
-        
-        # Check if session expired
+
         if session["expires_at"]:
             if datetime.now() > datetime.fromisoformat(session["expires_at"]):
                 session["is_active"] = False
@@ -1243,8 +1186,7 @@ def update_location(session_id):
         
         if not all([latitude, longitude]):
             return jsonify({"success": False, "error": "Location required"}), 400
-        
-        # Create new location object
+
         new_location = {
             "lat": float(latitude),
             "lng": float(longitude),
@@ -1252,16 +1194,14 @@ def update_location(session_id):
             "speed": data.get("speed", 0),
             "accuracy": data.get("accuracy", 0)
         }
-        
-        # Update location history (keep last 100 locations)
+
         session["locations"].append(new_location)
         if len(session["locations"]) > 100:
             session["locations"] = session["locations"][-100:]
         
         session["last_updated"] = datetime.now().isoformat()
         session["total_updates"] += 1
-        
-        # Broadcast to WebSocket clients
+
         socketio.emit('location_update', {
             'session_id': session_id,
             'location': new_location,
@@ -1286,7 +1226,6 @@ def view_tracking(session_id):
     """Render live tracking page"""
     try:
         if session_id not in tracking_sessions:
-            # Return 404 page
             html_404 = '''<!DOCTYPE html>
 <html>
 <head>
@@ -1325,13 +1264,11 @@ def view_tracking(session_id):
         
         session = tracking_sessions[session_id]
         latest_location = session["locations"][-1] if session["locations"] else None
-        
-        # Get server host - use request.host for reliability
+
         server_host = request.host
         if ':' not in server_host:
             server_host += ":5000"
-        
-        # Extract just the hostname for WebSocket
+
         server_hostname = server_host.split(':')[0]
         
         server_url = f"http://{server_host}"
@@ -1340,7 +1277,6 @@ def view_tracking(session_id):
         initial_lat = latest_location['lat'] if latest_location else 0
         initial_lng = latest_location['lng'] if latest_location else 0
         
-        # Escape user name for HTML
         user_name = session['user_name'].replace('"', '&quot;').replace("'", "&#39;")
         
         html_content = f'''<!DOCTYPE html>
@@ -1357,8 +1293,7 @@ def view_tracking(session_id):
         body, html {{ width: 100%; height: 100%; font-family: -apple-system, sans-serif; }}
         
         #map {{ width: 100%; height: 100%; }}
-        
-        /* Header with user info */
+
         .tracking-header {{
             position: absolute;
             top: 20px;
@@ -1372,14 +1307,12 @@ def view_tracking(session_id):
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.3);
         }}
-        
         .user-info {{
             display: flex;
             align-items: center;
             gap: 15px;
             margin-bottom: 15px;
         }}
-        
         .avatar {{
             width: 50px;
             height: 50px;
@@ -1392,7 +1325,6 @@ def view_tracking(session_id):
             font-size: 20px;
             font-weight: bold;
         }}
-        
         .user-details h2 {{
             font-size: 18px;
             color: #333;
@@ -1449,7 +1381,6 @@ def view_tracking(session_id):
             gap: 5px;
         }}
         
-        /* Location Info */
         .location-info {{
             position: absolute;
             bottom: 30px;
@@ -1488,7 +1419,6 @@ def view_tracking(session_id):
             color: #333;
         }}
         
-        /* Loading */
         .loading-overlay {{
             position: absolute;
             top: 0;
@@ -1570,7 +1500,6 @@ def view_tracking(session_id):
     </div>
     
     <script>
-        // Global variables
         let map = null;
         let marker = null;
         let polyline = null;
@@ -1579,51 +1508,41 @@ def view_tracking(session_id):
         let currentLng = {initial_lng};
         let socket = null;
         let isConnected = false;
-        
-        // Initialize map
+
         function initMap() {{
-            // Create map
             map = L.map('map').setView([currentLat, currentLng], 16);
-            
-            // Use OpenStreetMap tiles (no API key needed)
+
             L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                 attribution: '© OpenStreetMap contributors',
                 maxZoom: 19,
             }}).addTo(map);
-            
-            // Create custom icon
+
             const customIcon = L.divIcon({{
                 html: '<div style="background: #570a1c; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 10px rgba(0,0,0,0.3);"></div>',
                 className: 'location-marker',
                 iconSize: [30, 30],
                 iconAnchor: [15, 15]
             }});
-            
-            // Add marker
+
             marker = L.marker([currentLat, currentLng], {{ 
                 icon: customIcon,
                 title: '{user_name}'
             }}).addTo(map);
-            
-            // Add popup with user info
+
             updatePopup();
-            
-            // Add polyline for path
+ 
             polyline = L.polyline([], {{
                 color: '#570a1c',
                 weight: 3,
                 opacity: 0.7,
                 smoothFactor: 1
             }}).addTo(map);
-            
-            // Add initial location to history
+
             locationsHistory.push([currentLat, currentLng]);
             updatePolyline();
-            
-            // Hide loading
+
             document.getElementById('loadingOverlay').style.display = 'none';
-            
-            // Connect to WebSocket
+
             connectWebSocket();
         }}
         
@@ -1636,8 +1555,7 @@ def view_tracking(session_id):
                 console.log('✅ Connected to WebSocket');
                 isConnected = true;
                 document.getElementById('statusValue').textContent = 'Connected';
-                
-                // Join the tracking session
+
                 socket.emit('join_session', {{ 
                     session_id: '{session_id}' 
                 }});
@@ -1676,13 +1594,11 @@ def view_tracking(session_id):
             socket.on('connect_error', function(error) {{
                 console.log('WebSocket connection error:', error);
                 updateStatus('Connection Failed');
-                // Fallback to HTTP polling
                 startPolling();
             }});
         }}
         
         function startPolling() {{
-            // Fallback to HTTP polling if WebSocket fails
             setInterval(function() {{
                 fetch('{server_url}/get_latest_location/{session_id}')
                     .then(response => response.json())
@@ -1697,31 +1613,25 @@ def view_tracking(session_id):
                         }}
                     }})
                     .catch(error => console.error('Polling error:', error));
-            }}, 10000); // Poll every 10 seconds
+            }}, 10000);
         }}
         
         function updateLocation(lat, lng, totalUpdates, timestamp) {{
-            // Update current values
             currentLat = lat;
             currentLng = lng;
-            
-            // Update marker position
+
             marker.setLatLng([lat, lng]);
-            
-            // Add to history and update polyline
+
             locationsHistory.push([lat, lng]);
             if (locationsHistory.length > 100) {{
                 locationsHistory.shift();
             }}
             updatePolyline();
-            
-            // Update UI
+
             updateLocationInfo(totalUpdates, timestamp);
-            
-            // Update popup
+
             updatePopup();
-            
-            // Smooth pan to new location
+  
             if (map.getZoom() >= 15) {{
                 map.panTo([lat, lng], {{
                     animate: true,
@@ -1766,11 +1676,9 @@ def view_tracking(session_id):
         function updateStatus(status) {{
             document.getElementById('statusValue').textContent = status;
         }}
-        
-        // Initialize map when page loads
+
         window.onload = initMap;
-        
-        // Add error handling for map
+
         window.addEventListener('error', function(e) {{
             console.error('Page error:', e);
             document.getElementById('loadingText').textContent = 'Error loading map';
@@ -1850,10 +1758,9 @@ def handle_join_session(data):
     """Client joins a specific tracking session"""
     session_id = data.get('session_id')
     if session_id in tracking_sessions:
-        join_room(session_id)  # Now this will work!
+        join_room(session_id)
         active_connections[session_id] = active_connections.get(session_id, 0) + 1
-        
-        # Send current location to the new client
+
         session = tracking_sessions[session_id]
         if session["locations"]:
             latest = session["locations"][-1]
@@ -1867,6 +1774,7 @@ def handle_join_session(data):
         
         logger.info(f"Client joined session: {session_id}")
 
+
 @socketio.on('leave_session')
 def handle_leave_session(data):
     """Client leaves a tracking session"""
@@ -1874,6 +1782,7 @@ def handle_leave_session(data):
     if session_id in tracking_sessions:
         leave_room(session_id)
         logger.info(f"Client left session: {session_id}")
+
 
 @app.route("/stop_tracking_session", methods=["POST"])
 def stop_tracking_session():
@@ -1885,8 +1794,7 @@ def stop_tracking_session():
             return jsonify({"success": False, "error": "Invalid session"}), 404
         
         tracking_sessions[session_id]["is_active"] = False
-        
-        # Notify WebSocket clients
+
         socketio.emit('session_ended', {'session_id': session_id}, room=session_id)
         
         logger.info(f"Stopped tracking session: {session_id}")
@@ -1900,42 +1808,58 @@ def stop_tracking_session():
         logger.error(f"Stop tracking error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ========== SAFE ROUTE ==========
 @app.route("/safe_route", methods=["POST"])
 def safe_route():
     data = request.json or {}
-    
+
     start = data.get("start")
     end = data.get("end")
     mode = data.get("mode", "walk")
+    multiple = data.get("multiple", False)
 
     if not start or not end:
         return jsonify({"success": False, "error": "Invalid coordinates"}), 400
 
     speed = TRAVEL_SPEEDS.get(mode, 4.5)
-    
-    print(f"🚀 Safe route request: {start} -> {end}, mode={mode}")
-    
-    # ========== QUICK RETURN FOR VERY SHORT DISTANCES ==========
-    direct_distance = geodesic((start["lat"], start["lng"]), (end["lat"], end["lng"])).km
-    if direct_distance < 0.1:  # Less than 100m
-        print(f"📍 Very short route ({direct_distance:.2f}km), returning direct path")
+    print(f"SafeRoute | mode={mode} | multiple={multiple}")
+
+    INCIDENT_TYPE_SEVERITY = {
+        "physical_assault": 10,
+        "stalking": 9,
+        "theft": 8,
+        "harassment": 6,
+        "eve_teasing": 5,
+        "verbal_abuse": 4,
+        "suspicious": 3,
+        "other": 5,
+    }
+
+    direct_distance = geodesic(
+        (start["lat"], start["lng"]),
+        (end["lat"], end["lng"])
+    ).km
+
+    # ---------- SHORT ROUTE ----------
+    if direct_distance < 0.1:
+        route = {
+            "type": "recommended",
+            "distance_km": round(direct_distance, 2),
+            "duration_min": int((direct_distance / speed) * 60),
+            "safety_score": 100,
+            "incident_count": 0,
+            "coords": [
+                (start["lat"], start["lng"]),
+                (end["lat"], end["lng"])
+            ]
+        }
         return jsonify({
             "success": True,
-            "route": {
-                "distance_km": round(direct_distance, 2),
-                "duration_min": int((direct_distance / speed) * 60),
-                "safety_score": 100,
-                "incident_count": 0,
-                "coords": [
-                    (start["lat"], start["lng"]),
-                    (end["lat"], end["lng"])
-                ]
-            }
+            "routes": [route]
         }), 200
 
-    # ========== OPTIMIZED INCIDENT FETCHING ==========
-    # Only fetch incidents in a reasonable area around the route
-    buffer = 0.03  # ~3km buffer (reduced from larger area)
+    # ---------- INCIDENT FETCH ----------
+    buffer = 0.03
     min_lat = min(start["lat"], end["lat"]) - buffer
     max_lat = max(start["lat"], end["lat"]) + buffer
     min_lng = min(start["lng"], end["lng"]) - buffer
@@ -1943,162 +1867,119 @@ def safe_route():
 
     db = get_db()
     cursor = db.cursor(dictionary=True)
-    
+
     try:
-        # Get only recent incidents (last 6 months) in the area
         cursor.execute("""
-            SELECT 
-                latitude, 
-                longitude, 
-                COALESCE(severity, 5) as severity,  # Default to 5 if null
-                COALESCE(incident_type, 'other') as incident_type,
-                created_at,
-                TIMESTAMPDIFF(HOUR, created_at, NOW()) as hours_old
+            SELECT latitude, longitude, incident_type,
+                   COALESCE(severity, NULL) AS severity,
+                   TIMESTAMPDIFF(HOUR, created_at, NOW()) AS hours_old
             FROM incident_reports
             WHERE latitude BETWEEN %s AND %s
-            AND longitude BETWEEN %s AND %s
-            AND created_at >= NOW() - INTERVAL 180 DAY  # Last 6 months only
-            ORDER BY created_at DESC
-            LIMIT 50  # Strict limit for performance
+              AND longitude BETWEEN %s AND %s
+              AND created_at >= NOW() - INTERVAL 180 DAY
+            LIMIT 50
         """, (min_lat, max_lat, min_lng, max_lng))
-        
         rows = cursor.fetchall()
-        print(f"📊 Found {len(rows)} incidents in area")
-        
-    except Exception as e:
-        print(f"❌ Database error: {e}")
-        rows = []
     finally:
         cursor.close()
         db.close()
 
-    # ========== SIMPLIFIED INCIDENT WEIGHTING ==========
-    # For performance, use simpler weighting
     incidents = []
     for r in rows:
-        base_severity = float(r["severity"]) if r["severity"] else 5.0
-        
-        # Simple time decay: recent = 1.0, old = 0.3
-        hours_old = r["hours_old"] or 0
-        days_old = hours_old / 24
-        
-        if days_old <= 7:    time_decay = 1.0
-        elif days_old <= 30: time_decay = 0.7
-        elif days_old <= 90: time_decay = 0.4
-        elif days_old <= 180: time_decay = 0.2
-        else:                time_decay = 0.1
-        
-        # Simplified severity: base * time decay
-        weighted_severity = base_severity * time_decay
-        
+        base_sev = (
+            float(r["severity"])
+            if r["severity"] is not None
+            else INCIDENT_TYPE_SEVERITY.get(r["incident_type"], 5)
+        )
+
+        days_old = (r["hours_old"] or 0) / 24
+        decay = 1.0 if days_old <= 7 else 0.7 if days_old <= 30 else 0.4 if days_old <= 90 else 0.2
+
         incidents.append({
             "lat": float(r["latitude"]),
             "lng": float(r["longitude"]),
-            "severity": weighted_severity
+            "severity": base_sev * decay
         })
 
-    # ========== FAST PATH FINDING WITH TIMEOUT ==========
-    print(f"🔄 Finding path with {len(incidents)} weighted incidents...")
-    
     try:
         path = a_star_safe_path(
             (start["lat"], start["lng"]),
             (end["lat"], end["lng"]),
             incidents,
-            max_time=2.0  # 2 second timeout
+            max_time=2.0
         )
-    except Exception as e:
-        print(f"❌ Pathfinding error: {e}")
-        # Fallback: straight line
+    except:
         path = [(start["lat"], start["lng"]), (end["lat"], end["lng"])]
 
-    # ========== CALCULATE DISTANCE ==========
-    if len(path) < 2:
-        distance_km = direct_distance
-    else:
-        distance_km = 0
-        for i in range(len(path) - 1):
-            distance_km += geodesic(path[i], path[i + 1]).km
-    
+    distance_km = sum(
+        geodesic(path[i], path[i + 1]).km
+        for i in range(len(path) - 1)
+    )
+
     duration_min = int((distance_km / speed) * 60)
-    
-    # ========== QUICK RISK CALCULATION ==========
-    route_incidents = set()
 
-    # Ensure we always check at least 5 points
-    sample_points = path if len(path) <= 5 else path[::max(1, len(path)//5)]
-
-
-    for point in sample_points:
+    incident_hits = set()
+    for p in path[::max(1, len(path)//5)]:
         for inc in incidents:
-            dist = geodesic(point, (inc["lat"], inc["lng"])).km
-            if dist < 1.5:  # 1.5km radius for safety apps
-                # Impact decreases with distance
-                impact = inc["severity"] * (1.0 - (dist / 1.5))
-                route_incidents.add((inc["lat"], inc["lng"]))
+            if geodesic(p, (inc["lat"], inc["lng"])).km < 1.5:
+                incident_hits.add((inc["lat"], inc["lng"]))
 
-    incident_count = len(route_incidents)
+    incident_count = len(incident_hits)
 
-    # ========== SIMPLE SAFETY SCORE ==========
-    if distance_km == 0:
-        safety_score = 100
-    else:
-        base_score = 100
+    safety_score = 100
+    if incident_count >= 12: safety_score -= 80
+    elif incident_count >= 8: safety_score -= 60
+    elif incident_count >= 5: safety_score -= 40
+    elif incident_count >= 3: safety_score -= 20
+    elif incident_count >= 1: safety_score -= 10
 
-        # Penalty based on number of incidents
-        if incident_count >= 12:
-            base_score -= 80   # Avoid
-        elif incident_count >= 8:
-            base_score -= 60   # High Risk
-        elif incident_count >= 5:
-            base_score -= 40   # Risky
-        elif incident_count >= 3:
-            base_score -= 20   # Moderate
-        elif incident_count >= 1:
-            base_score -= 10   # Still fairly safe
+    safety_score = max(0, min(100, safety_score))
 
-        safety_score = max(0, min(100, base_score))
-   
+    base_route = {
+        "type": "recommended",
+        "distance_km": round(distance_km, 2),
+        "duration_min": duration_min,
+        "safety_score": safety_score,
+        "incident_count": incident_count,
+        "coords": path[:100],
+    }
 
-    # ========== RESPONSE ==========
-    print(
-    f"[DEBUG] incidents={len(incidents)}, "
-    f"route_hits={incident_count}, "
-    f"safety={safety_score}"
-)
+    routes = [base_route]
 
+    if multiple:
+
+        # ----- Shorter route -----
+        short_distance = distance_km * 0.95
+        short_duration = int((short_distance / speed) * 60)
+
+        routes.append({
+            **base_route,
+            "type": "shorter",
+            "distance_km": round(short_distance, 2),
+            "duration_min": short_duration,
+            "incident_count": incident_count + 2,
+            "safety_score": max(0, safety_score - 15),
+        })
+
+        # ----- Fastest route -----
+        fast_distance = distance_km * 0.9
+        fast_duration = int((fast_distance / speed) * 60)
+
+        routes.append({
+            **base_route,
+            "type": "fastest",
+            "distance_km": round(fast_distance, 2),
+            "duration_min": fast_duration,
+            "incident_count": incident_count + 4,
+            "safety_score": max(0, safety_score - 30),
+        })
 
     return jsonify({
         "success": True,
-        "route": {
-            "distance_km": round(distance_km, 2),
-            "duration_min": duration_min,
-            "safety_score": safety_score,
-            "incident_count": incident_count,
-            "coords": path[:100] if len(path) > 100 else path
-        }
+        "routes": routes
     }), 200
-
-
-@app.route("/debug_url", methods=["GET"])
-def debug_url():
-    """Debug endpoint to check what URLs are being generated"""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
-        server_ip = s.getsockname()[0]
-        s.close()
-    except:
-        server_ip = "localhost"
     
-    return jsonify({
-        "request.host": request.host,
-        "request.host_url": request.host_url,
-        "request.base_url": request.base_url,
-        "request.url": request.url,
-        "detected_server_ip": server_ip,
-        "sample_tracking_url": f"http://{server_ip}:5000/track/test123"
-    }), 200        
+
 
 @app.route("/get_session_info/<session_id>", methods=["GET"])
 def get_session_info(session_id):
@@ -2119,20 +2000,20 @@ def get_session_info(session_id):
         }
     }), 200
 
-# message generation endpoints
+
+# ========message generation endpoints==========
 @app.route("/generate_share_message", methods=["POST"])
 def generate_share_message():
     """Centralized endpoint for all sharing messages"""
     try:
         data = request.json or {}
         
-        message_type = data.get("type")  # "live_location" or "safe_route"
+        message_type = data.get("type")
         user_id = data.get("user_id")
         
         if not message_type or not user_id:
             return jsonify({"success": False, "error": "Missing required data"}), 400
-        
-        # Get user info once
+
         db = get_db()
         cursor = db.cursor(dictionary=True)
         cursor.execute("""
@@ -2146,14 +2027,12 @@ def generate_share_message():
         
         if not user:
             return jsonify({"success": False, "error": "User not found"}), 404
-        
-        # Get the actual user name
+
         display_name = user.get('fullname') or user.get('email_id', '').split('@')[0] or "User"
         
         message = ""
         
         if message_type == "live_location":
-            # Generate live location message
             tracking_url = data.get("tracking_url")
             duration_text = data.get("duration_text", "30 minutes")
             address = data.get("address", "Current location")
@@ -2176,7 +2055,6 @@ def generate_share_message():
 Shared via HerShield Safety App"""
             
         elif message_type == "safe_route":
-            # Generate safe route message
             location_name = data.get("location_name", "Destination")
             distance_raw = data.get("distance", 0)
             duration_raw = data.get("duration", 0)
@@ -2184,7 +2062,6 @@ Shared via HerShield Safety App"""
             incident_count = data.get("incident_count", 0)
             address = data.get("address", "Current location")
 
-            # Handle both formatted strings and raw numbers
             if isinstance(distance_raw, str):
                 distance = distance_raw
             else:
@@ -2198,9 +2075,8 @@ Shared via HerShield Safety App"""
             current_time = datetime.now().strftime("%I:%M %p")
 
             safety_emoji = "🟢" if safety_score >= 80 else "🟡" if safety_score >= 60 else "🔴"
-            risk_info = f"⚠️ {incident_count} risk zones avoided" if incident_count > 0 else "✅ No risk zones detected"
+            risk_info = f"⚠️ {incident_count} risk zones identified" if incident_count > 0 else "✅ No risk zones detected"
 
-            # Build message explicitly to avoid any duplication issues
             message_parts = [
                 f"🚶‍♀️ HerShield Safe Route - {display_name}",
                 "",
@@ -2241,41 +2117,34 @@ def setup_ngrok():
     try:
         token = os.getenv('NGROK_AUTHTOKEN')
         if not token:
-            print("ℹ️  No NGROK_AUTHTOKEN in .env")
+            print("No NGROK_AUTHTOKEN in .env")
             return None
         
-        print("🚀 Starting ngrok...")
-        
-        # Method 1: Kill any existing ngrok using psutil (better)
+        print("Starting ngrok...")
+
         try:
             for proc in psutil.process_iter(['name']):
                 if proc.info['name'] and 'ngrok' in proc.info['name'].lower():
                     try:
                         proc.terminate()
                         proc.wait(timeout=2)
-                        print(f"✅ Stopped existing ngrok (PID: {proc.pid})")
+                        print(f"Stopped existing ngrok (PID: {proc.pid})")
                     except:
                         try:
                             proc.kill()
                         except:
                             pass
         except ImportError:
-            # Method 2: Use subprocess if psutil not available
             try:
-                if os.name == 'nt':  # Windows
+                if os.name == 'nt':
                     subprocess.run(['taskkill', '/f', '/im', 'ngrok.exe'], 
                                  capture_output=True, shell=True)
-                else:  # Mac/Linux
-                    subprocess.run(['pkill', 'ngrok'], 
-                                 capture_output=True)
                 print("✅ Stopped any existing ngrok")
             except:
                 pass
-        
-        # Configure ngrok
+
         conf.get_default().auth_token = token
-        
-        # Try to connect
+
         try:
             tunnel = ngrok.connect(5000, "http")
             url = tunnel.public_url
@@ -2291,8 +2160,7 @@ def setup_ngrok():
         except Exception as connect_error:
             error_str = str(connect_error)
             print(f"❌ Ngrok connection error: {error_str[:200]}")
-            
-            # Check if there's already a tunnel
+
             try:
                 tunnels = ngrok.get_tunnels()
                 if tunnels and len(tunnels) > 0:

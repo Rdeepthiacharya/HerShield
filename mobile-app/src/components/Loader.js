@@ -71,7 +71,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 99999,
   },
-
   spinner: {
     borderTopColor: "#8B133E",
     borderRightColor: "#4A0D35",

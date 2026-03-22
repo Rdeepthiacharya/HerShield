@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
@@ -15,20 +16,78 @@ export default function Dashboard({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [contactsPreview, setContactsPreview] = useState([]);
 
+  const [showLiveTrackingDot, setShowLiveTrackingDot] = useState(false);
+
+  const refreshLiveTrackingIndicator = useCallback(async () => {
+    try {
+      let navActive = false;
+      const stored = await AsyncStorage.getItem("active_tracking_session");
+      if (stored) {
+        const session = JSON.parse(stored);
+        if (session.expires_at) {
+          const now = Date.now();
+          const expiry = new Date(session.expires_at).getTime();
+          if (now >= expiry) {
+            await AsyncStorage.removeItem("active_tracking_session");
+          } else {
+            navActive = true;
+          }
+        } else {
+          navActive = true;
+        }
+      }
+
+      await AsyncStorage.setItem("isSharing", navActive ? "true" : "false");
+
+      let sosActive = false;
+      const emergency = await AsyncStorage.getItem("emergency_tracking_session");
+      if (emergency) {
+        try {
+          JSON.parse(emergency);
+          sosActive = true;
+        } catch {
+          sosActive = false;
+        }
+      }
+
+      setShowLiveTrackingDot(navActive || sosActive);
+    } catch {
+      setShowLiveTrackingDot(false);
+    }
+  }, []);
+
   const [stats, setStats] = useState({
     reportsFiled: 0,
     sosUsed: 0,
   });
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning ☀️";
+    if (hour < 18) return "Good afternoon 🌤️";
+    return "Good evening 🌙";
+  };
+
+  // Context banner
+  const getSafetyMessage = () => {
+    const hour = new Date().getHours();
+    if (hour >= 21 || hour <= 5) {
+      return "You're out late. Consider sharing your live location.";
+    }
+    return "Stay aware and keep emergency contacts ready.";
+  };
+
   useEffect(() => {
-    const fetchUserData = async () => {
+    const fetchData = async () => {
       try {
         const storedUser = await AsyncStorage.getItem("user");
+        await refreshLiveTrackingIndicator();
+
         if (storedUser) {
           const parsedUser = JSON.parse(storedUser);
           setUserName(parsedUser.fullname);
 
-          // Fetch trusted contacts
+          // contacts
           const contactsRes = await fetch(
             `${BASE_URL}/trusted-contacts/${parsedUser.id}`
           );
@@ -38,35 +97,43 @@ export default function Dashboard({ navigation }) {
             setContactsPreview(contactsData.contacts);
           }
 
-          // Fetch user statistics
-          console.log("Fetching stats for user ID:", parsedUser.id);
+          // stats
           const statsRes = await fetch(
             `${BASE_URL}/user-stats/${parsedUser.id}`
           );
-          console.log("Stats response status:", statsRes.status);
           const statsData = await statsRes.json();
-          console.log("Stats data received:", statsData);
 
-          if (statsData.success && statsData.stats) {
+          if (statsData.success) {
             setStats({
               reportsFiled: statsData.stats.reports_filed,
               sosUsed: statsData.stats.sos_used,
             });
-            console.log("Stats updated:", statsData.stats);
-          } else {
-            console.log("Stats fetch failed or no data:", statsData);
           }
         }
 
-      } catch (error) {
-        console.error("Error loading data:", error);
+      } catch (err) {
+        console.log("Dashboard error:", err);
       } finally {
-        setTimeout(() => setLoading(false), 300);
+        setLoading(false);
       }
     };
 
-    fetchUserData();
-  }, []);
+    fetchData();
+  }, [refreshLiveTrackingIndicator]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshLiveTrackingIndicator();
+    }, [refreshLiveTrackingIndicator])
+  );
+
+  useEffect(() => {
+    if (!showLiveTrackingDot) return;
+    const id = setInterval(() => {
+      refreshLiveTrackingIndicator();
+    }, 5000);
+    return () => clearInterval(id);
+  }, [showLiveTrackingDot, refreshLiveTrackingIndicator]);
 
   const handleActivateSOS = () => {
     navigation.navigate("SOS");
@@ -74,18 +141,39 @@ export default function Dashboard({ navigation }) {
 
   return (
     <>
-      <AppHeader title="HerShield"
-      // logoSource={require("../assets/icon/app-favicon.png")}
-      />
+      <AppHeader title="HerShield" />
 
       <PageWrapper loading={loading}>
         <View style={styles.container}>
-          <ScreenHeader title={<Text>Welcome back, {"\n"} {userName || "User"}</Text>} />
+
+          <View style={styles.headerWithDot}>
+            <ScreenHeader
+              title={
+                <Text>
+                  {getGreeting()}
+                  {"\n"}
+                  {userName || "User"}
+                </Text>
+              }
+            />
+            {showLiveTrackingDot ? (
+              <View
+                style={styles.liveDot}
+                accessible
+                accessibilityLabel="Live location or SOS tracking is active"
+              />
+            ) : null}
+          </View>
+
+          {/* Context Banner */}
+          <View style={styles.alertBanner}>
+            <MaterialCommunityIcons name="shield-alert" size={18} color="#fff" />
+            <Text style={styles.alertText}>{getSafetyMessage()}</Text>
+          </View>
 
           {/* SOS */}
           <View style={styles.centerArea}>
             <TouchableOpacity
-              style={styles.sosButton}
               onPress={handleActivateSOS}
               activeOpacity={0.9}
             >
@@ -107,15 +195,15 @@ export default function Dashboard({ navigation }) {
           <View style={styles.statsRow}>
             <View style={styles.statCard}>
               <Text style={styles.statNumber}>{stats.reportsFiled}</Text>
-              <Text style={styles.statLabelSmall}>Reports Filed</Text>
+              <Text style={styles.statLabel}>Reports</Text>
             </View>
+
             <View style={styles.statCard}>
               <Text style={styles.statNumber}>{stats.sosUsed}</Text>
-              <Text style={styles.statLabelSmall}>SOS Used</Text>
+              <Text style={styles.statLabel}>SOS Used</Text>
             </View>
           </View>
 
-          {/* Trusted Contacts */}
           <View style={styles.section}>
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>Trusted Contacts</Text>
@@ -124,41 +212,24 @@ export default function Dashboard({ navigation }) {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.contactsPreview}>
-              {contactsPreview.length === 0 ? (
-                <Text style={styles.emptyText}>No contacts yet</Text>
-              ) : (
-                contactsPreview.map((c, i) => (
-                  <View key={i} style={styles.contactPreviewItem}>
-                    <View style={styles.contactAvatar}>
-                      <Text style={styles.contactAvatarText}>
-                        {c.contact_name[0].toUpperCase()}
-                      </Text>
-                    </View>
-
-                    <Text style={styles.contactPreviewText}>
-                      {c.contact_name}
+            {contactsPreview.length === 0 ? (
+              <Text style={styles.emptyText}>No contacts yet</Text>
+            ) : (
+              contactsPreview.map((c, i) => (
+                <TouchableOpacity key={i} style={styles.contactItem}>
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>
+                      {c.contact_name[0].toUpperCase()}
                     </Text>
                   </View>
-                ))
-              )}
-            </View>
+                  <Text style={styles.contactName}>
+                    {c.contact_name}
+                  </Text>
+                </TouchableOpacity>
+              ))
+            )}
           </View>
 
-          <View style={[styles.section, { marginBottom: 40 }]}>
-            <Text style={styles.sectionTitle}>Safety Tip of the Day</Text>
-            <View style={styles.tipCard}>
-              <MaterialCommunityIcons
-                name="lightbulb-on-outline"
-                size={20}
-                color="#ffd54f"
-              />
-              <Text style={styles.tipText}>
-                Walk in well-lit areas at night and share your live location
-                with a trusted contact.
-              </Text>
-            </View>
-          </View>
         </View>
       </PageWrapper>
 
@@ -168,57 +239,83 @@ export default function Dashboard({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-
   container: { paddingHorizontal: 20 },
-  /* SOS */
+
+  alertBanner: {
+    flexDirection: "row",
+    backgroundColor: "#8B133E",
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 15,
+    alignItems: "center",
+    gap: 8,
+  },
+  alertText: { color: "#fff", flex: 1 },
+
+  headerWithDot: {
+    position: "relative",
+    alignSelf: "stretch",
+  },
+  liveDot: {
+    position: "absolute",
+    right: 4,
+    top: 36,
+    width: 20,
+    height: 20,
+    borderRadius: 15,
+    backgroundColor: "#43A047",
+    borderWidth: 2,
+    borderColor: "#fff",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+  },
+
   centerArea: { alignItems: "center" },
-  sosButton: { alignSelf: "center" },
+
   sosGradient: {
     width: 180,
     height: 180,
     borderRadius: 90,
     alignItems: "center",
     justifyContent: "center",
-    elevation: 10,
+    elevation: 8,
   },
-  sosText: { color: "#fff", fontSize: 18, fontWeight: "700", marginTop: 8 },
+  sosText: { color: "#fff", fontSize: 18, fontWeight: "700" },
 
-  /* Stats */
   statsRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 20,
+    marginTop: 25,
   },
   statCard: {
     flex: 1,
-    backgroundColor: "#fafafa",
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 10,
+    backgroundColor: "#fff",
+    padding: 15,
+    borderRadius: 12,
     marginHorizontal: 6,
     alignItems: "center",
+    elevation: 4,
   },
   statNumber: { fontSize: 20, fontWeight: "800", color: "#8B133E" },
-  statLabelSmall: { color: "#666", fontSize: 12, marginTop: 6 },
+  statLabel: { color: "#666", marginTop: 6 },
 
-  /* Sections */
-  section: { marginTop: 22 },
+  section: { marginTop: 30 },
+
   sectionHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 8,
   },
-  sectionTitle: { fontSize: 16, fontWeight: "700", color: "#4A0D35" },
-  viewAll: { color: "#8B133E", fontWeight: "700" },
 
-  /* Contacts */
-  contactsPreview: { marginTop: 8 },
-  contactPreviewItem: {
+  sectionTitle: { fontWeight: "700", color: "#4A0D35" },
+
+  contactItem: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 12,
+    marginTop: 12,
   },
-  contactAvatar: {
+  avatar: {
     width: 38,
     height: 38,
     borderRadius: 10,
@@ -227,20 +324,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 12,
   },
-  contactAvatarText: { color: "#8B133E", fontWeight: "700" },
-  contactPreviewText: { color: "#333" },
+  avatarText: { color: "#8B133E", fontWeight: "700" },
+  contactName: { color: "#333" },
 
-  /* Tip */
-  tipCard: {
-    marginTop: 8,
-    backgroundColor: "#fff8e6",
-    borderRadius: 10,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  tipText: { color: "#5c4b2a", flex: 1 },
-
-  emptyText: { color: "#999", textAlign: "center" },
+  emptyText: { color: "#999", marginTop: 10 },
 });
