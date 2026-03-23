@@ -675,45 +675,44 @@ Sent via HerShield App`;
             </LinearGradient>
           </TouchableOpacity>
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Emergency alert</Text>
-            <Text style={styles.sectionHint}>
-            A loud siren plays continuously until stopped to alert others nearby.
-            </Text>
-            <Animated.View style={{ transform: [{ scale: panicScale }] }}>
+
+
+          {isSharingLiveLocation && trackingUrl && (
+            <View style={styles.trackingPanel}>
+              <Text style={styles.trackingTitle}>SOS Active</Text>
+
               <TouchableOpacity
-                style={[
-                  styles.panicButton,
-                  isPanicAlarmPlaying && styles.panicButtonActive,
-                ]}
-                activeOpacity={0.92}
-                onPressIn={() => {
-                  Animated.spring(panicScale, {
-                    toValue: 0.96,
-                    useNativeDriver: true,
-                    friction: 6,
-                  }).start();
+                style={styles.linkContainer}
+                onPress={() => {
+                  Clipboard.setString(trackingUrl);
+                  toast.showToast("Link copied", "info");
                 }}
-                onPressOut={() => {
-                  Animated.spring(panicScale, {
-                    toValue: 1,
-                    useNativeDriver: true,
-                    friction: 5,
-                  }).start();
-                }}
-                onPress={togglePanicAlarm}
               >
-                <Ionicons
-                  name={isPanicAlarmPlaying ? "stop-circle" : "volume-high"}
-                  size={22}
-                  color="#fff"
-                />
-                <Text style={styles.panicText}>
-                  {isPanicAlarmPlaying ? "Stop panic alarm" : "Play panic alarm"}
+                <Text style={styles.linkText} numberOfLines={1}>
+                  {trackingUrl}
                 </Text>
+                <Text style={styles.copyHint}>Tap to copy</Text>
               </TouchableOpacity>
-            </Animated.View>
-          </View>
+
+              <View style={styles.trackingActions}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => showTrackingOptions(trackingUrl)}
+                >
+                  <Ionicons name="share-outline" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Share Link</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.stopButton]}
+                  onPress={stopTracking}
+                >
+                  <Ionicons name="stop-circle-outline" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Stop</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
           {isNavigationTrackingActive && navigationTrackingUrl ? (
             <View style={styles.navTrackingPanel}>
@@ -754,42 +753,46 @@ Sent via HerShield App`;
             </View>
           ) : null}
 
-          {isSharingLiveLocation && trackingUrl && (
-            <View style={styles.trackingPanel}>
-              <Text style={styles.trackingTitle}>📍 Live Location Active</Text>
-
+<View style={styles.section}>
+            <Text style={styles.sectionTitle}>Emergency alert</Text>
+            <Text style={styles.sectionHint}>
+            A loud siren plays continuously until stopped to alert others nearby.
+            </Text>
+            <Animated.View style={{ transform: [{ scale: panicScale }] }}>
               <TouchableOpacity
-                style={styles.linkContainer}
-                onPress={() => {
-                  Clipboard.setString(trackingUrl);
-                  toast.showToast("Link copied", "info");
+                style={[
+                  styles.panicButton,
+                  isPanicAlarmPlaying && styles.panicButtonActive,
+                ]}
+                activeOpacity={0.92}
+                onPressIn={() => {
+                  Animated.spring(panicScale, {
+                    toValue: 0.96,
+                    useNativeDriver: true,
+                    friction: 6,
+                  }).start();
                 }}
+                onPressOut={() => {
+                  Animated.spring(panicScale, {
+                    toValue: 1,
+                    useNativeDriver: true,
+                    friction: 5,
+                  }).start();
+                }}
+                onPress={togglePanicAlarm}
               >
-                <Text style={styles.linkText} numberOfLines={1}>
-                  {trackingUrl}
+                <Ionicons
+                  name={isPanicAlarmPlaying ? "stop-circle" : "volume-high"}
+                  size={22}
+                  color="#fff"
+                />
+                <Text style={styles.panicText}>
+                  {isPanicAlarmPlaying ? "Stop panic alarm" : "Play panic alarm"}
                 </Text>
-                <Text style={styles.copyHint}>Tap to copy</Text>
               </TouchableOpacity>
+            </Animated.View>
+          </View>        
 
-              <View style={styles.trackingActions}>
-                <TouchableOpacity
-                  style={styles.actionButton}
-                  onPress={() => showTrackingOptions(trackingUrl)}
-                >
-                  <Ionicons name="share-outline" size={20} color="#fff" />
-                  <Text style={styles.actionButtonText}>Share Link</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.stopButton]}
-                  onPress={stopTracking}
-                >
-                  <Ionicons name="stop-circle-outline" size={20} color="#fff" />
-                  <Text style={styles.actionButtonText}>Stop</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
 
           <View style={styles.actions}>
             <ActionButton
