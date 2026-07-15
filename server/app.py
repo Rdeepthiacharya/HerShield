@@ -26,7 +26,6 @@ import psutil
 load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VOSK_MODEL_DIR = os.path.join(BASE_DIR, "ml", "vosk_model")
 
 FAST2SMS_API_KEY = os.getenv("FAST2SMS_API_KEY", "")
 GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY", "")
@@ -47,7 +46,24 @@ def get_db():
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASSWORD"),
         database=os.getenv("DB_NAME"),
-    )   
+    )
+
+
+def serialize_user(user):
+    if not user:
+        return user
+    serialized = dict(user)
+    for field in ("birth_date", "created_at", "updated_at"):
+        value = serialized.get(field)
+        if value is not None and hasattr(value, "isoformat"):
+            serialized[field] = value.isoformat()
+    return serialized
+
+
+def normalize_birth_date(value):
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    return parser.parse(str(value)).date().isoformat()
 
 def get_public_url():
     """Get public URL for tracking"""
@@ -439,7 +455,7 @@ def login():
         return jsonify({"error": "Invalid credentials"}), 401
 
     user.pop("password_hash", None)
-    return jsonify({"message": "Login success", "user": user}), 200
+    return jsonify({"message": "Login success", "user": serialize_user(user)}), 200
 
 @app.route("/logout", methods=["POST"])
 def logout():
@@ -492,7 +508,7 @@ def get_user(email):
     db.close()
 
     if user:
-        return jsonify({"success": True, "user": user}), 200
+        return jsonify({"success": True, "user": serialize_user(user)}), 200
     else:
         return jsonify({"success": False, "message": "User not found"}), 404
 
@@ -503,30 +519,40 @@ def update_profile():
     if not user_id:
         return jsonify({"error": "User ID required"}), 400
 
+    try:
+        birth_date = normalize_birth_date(data.get("birth_date"))
+    except (ValueError, TypeError, parser.ParserError):
+        return jsonify({"error": "Invalid birth date format. Use YYYY-MM-DD."}), 400
+
     db = get_db()
     cursor = db.cursor()
-    cursor.execute(
-        """
-        UPDATE users SET
-            fullname=%s, mobile_no=%s, birth_date=%s,
-            address_line_1=%s, city=%s, state=%s, zip_code=%s
-        WHERE id=%s
-    """,
-        (
-            data.get("fullname"),
-            data.get("mobile_no"),
-            data.get("birth_date"),
-            data.get("address_line_1"),
-            data.get("city"),
-            data.get("state"),
-            data.get("zip_code"),
-            user_id,
-        ),
-    )
-    db.commit()
-    cursor.close()
-    db.close()
-    return jsonify({"message": "Profile updated"}), 200
+    try:
+        cursor.execute(
+            """
+            UPDATE users SET
+                fullname=%s, mobile_no=%s, birth_date=%s,
+                address_line_1=%s, city=%s, state=%s, zip_code=%s
+            WHERE id=%s
+        """,
+            (
+                data.get("fullname"),
+                data.get("mobile_no"),
+                birth_date,
+                data.get("address_line_1"),
+                data.get("city"),
+                data.get("state"),
+                data.get("zip_code"),
+                user_id,
+            ),
+        )
+        db.commit()
+        return jsonify({"message": "Profile updated"}), 200
+    except Exception as e:
+        logger.error(f"update_profile error: {e}")
+        return jsonify({"error": "Profile update failed"}), 500
+    finally:
+        cursor.close()
+        db.close()
 
 @app.route("/user-stats/<int:user_id>", methods=["GET"])
 def get_user_stats(user_id):
@@ -759,7 +785,7 @@ def send_sos_sms():
         google_maps_link = "" 
         location_store = "Unknown"
 
-    # ====== AUTO VOICE MESSAGE ======
+    # ====== AUTOMATIC EMERGENCY MESSAGE ======
     if auto and trigger_reason:
         message = f"""🚨 AUTOMATIC EMERGENCY ALERT
 
@@ -770,7 +796,7 @@ def send_sos_sms():
 📍 LIVE LOCATION TRACKING:
 {tracking_url if tracking_url else google_maps_link}
 
-⚠️ This alert was automatically triggered by voice analysis.
+⚠️ This alert was automatically triggered.
 Please check on them immediately!
 
 Sent via HerShield Auto-SOS"""
@@ -811,7 +837,7 @@ Please check on them immediately.
 Sent via HerShield App"""
 
     sms_ok = send_sms(recipients, message)
-    trigger_type = "auto_voice" if auto and trigger_reason else ("auto" if auto else "manual")
+    trigger_type = trigger_reason if (auto and trigger_reason) else ("auto" if auto else "manual")
     save_sos_log(
         user_id,
         trigger_type,

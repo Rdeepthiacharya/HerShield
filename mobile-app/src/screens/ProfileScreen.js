@@ -19,6 +19,17 @@ function formatDate(dateString) {
   return date.toLocaleString();
 }
 
+function formatBirthDateForApi(dateString) {
+  if (!dateString) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return dateString;
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return null;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function ProfileScreen({ navigation }) {
   const toast = useToast();
   const [user, setUser] = useState({
@@ -71,7 +82,10 @@ export default function ProfileScreen({ navigation }) {
         }
 
         if (mounted) {
-          setUser(userData.user);
+          setUser({
+            ...userData.user,
+            birth_date: formatBirthDateForApi(userData.user.birth_date) || "",
+          });
         }
 
         const contactsRes = await fetch(`${BASE_URL}/trusted-contacts/${userData.user.id}`);
@@ -125,7 +139,7 @@ export default function ProfileScreen({ navigation }) {
           id: user.id,
           fullname: user.fullname,
           mobile_no: user.mobile_no,
-          birth_date: user.birth_date,
+          birth_date: formatBirthDateForApi(user.birth_date),
           address_line_1: user.address_line_1,
           city: user.city,
           state: user.state,
@@ -133,19 +147,29 @@ export default function ProfileScreen({ navigation }) {
         }),
       });
 
-      if (!res.ok) throw new Error("Profile update failed");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "Profile update failed");
+      }
 
       const updated = await AsyncStorage.getItem("user");
       if (updated) {
         const parsed = JSON.parse(updated);
         parsed.fullname = user.fullname;
         parsed.mobile_no = user.mobile_no;
+        parsed.birth_date = formatBirthDateForApi(user.birth_date);
+        parsed.address_line_1 = user.address_line_1;
+        parsed.city = user.city;
+        parsed.state = user.state;
+        parsed.zip_code = user.zip_code;
         await AsyncStorage.setItem("user", JSON.stringify(parsed));
       }
 
       setEditing(false);
+      toast.showToast("Profile updated successfully!", "success");
     } catch (err) {
       console.warn(err);
+      toast.showToast(err.message || "Profile update failed", "error");
     } finally {
       setLoading(false);
     }

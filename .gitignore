@@ -1,108 +1,49 @@
-# ROOT CONFIG--------------
-
-# Environment variables
+# Secret & Configuration Files
 .env
 .env.*
 *.env
+server/.env
+mobile-app/.env
 
-# OS files
+# OS & Editor Files
 .DS_Store
 Thumbs.db
-*.tmp
-*.temp
-
-# Editor settings
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
+*.tmp
+*.temp
 
-#REACT NATIVE (mobile-app)--------------
-
-# Node dependencies
+# Mobile App (React Native & Expo) Cache & Dependencies
+node_modules/
 mobile-app/node_modules/
-
-# Expo folders
 mobile-app/.expo/
 mobile-app/.expo-shared/
-
-# Metro cache
 mobile-app/.metro/
-
-# Build outputs
 mobile-app/build/
 mobile-app/dist/
-mobile-app/.tmp/
 
-# Android build folders
-mobile-app/android/
+# Android Build Outputs & Keystores
+mobile-app/android/.gradle/
+mobile-app/android/build/
+mobile-app/android/app/build/
 mobile-app/.gradle/
-mobile-app/.idea/
-
-# RN artifacts
 *.apk
 *.aab
 *.keystore
 *.jks
-*.ipa
-*.dSYM.zip
-*.dSYM
 
-# Other RN temp files
-expo-debug.log*
-
-#PYTHON BACKEND (server)--------------
-
-# Python cache
-server/__pycache__/
-server/*.pyc
-server/*.pyo
-
-# Virtual environments
+# Python Backend (Flask) & Virtual Environments
 .venv/
 venv/
-env/
-ENV/
 server/.venv/
+__pycache__/
+server/__pycache__/
+*.pyc
+*.pyo
 
-# Python ML & model files
-server/ml/
-server/models/
-*.h5
-*.pb
-*.tflite
-*.onnx
-*.pkl
-*.joblib
-*.model
-*.pv
-*.ppn
-
-#DATABASE FILES--------------
+# Databases, Logs & Debug Files
 *.db
-*.sqlite
-*.sqlite3
-
-#LOGS & REPORTS--------------
-logs/
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-coverage/
-test-results/
-.nyc_output/
-junit.xml
-
-#PACKAGE MANAGERS--------------
-# package-lock.json
-
-
-#MISC / CACHE--------------
-.cache/
-*.tgz
-*.tar.gz
-.watchmanconfig
-.eslintcache
-*.tsbuildinfo

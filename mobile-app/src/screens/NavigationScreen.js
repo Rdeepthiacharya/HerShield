@@ -973,6 +973,14 @@ export default function NavigationScreen({ route, navigation }) {
       return;
     }
 
+    // Auto-align route starting point with current location if user has moved/drifted
+    const startPt = routeCoords[0];
+    const userLngLat = [liveLocation.longitude, liveLocation.latitude];
+    const distFromStart = approxDistanceMeters(userLngLat, startPt);
+    if (distFromStart > 20) {
+      rerouteFromCurrentLocation(liveLocation);
+    }
+
     normalizedRouteRef.current = routeCoords;
     const steps = extractSteps(selectedRoute, routeCoords);
     setNavigationSteps(steps);
